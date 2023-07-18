@@ -1,0 +1,219 @@
+クライアント
+
+#include <iostream>
+#include <cstring>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/bio.h>
+#include <openssl/x509.h>
+#include <openssl/pem.h>
+#include <chrono>
+
+class TlsClient {
+public:
+    TlsClient() {
+        SSL_load_error_strings();
+        ERR_load_BIO_strings();
+        OpenSSL_add_all_algorithms();
+        SSL_library_init();
+
+        ctx = SSL_CTX_new(TLSv1_2_client_method());
+        if (!ctx) {
+            std::cerr << "Failed to create SSL context." << std::endl;
+            exit(EXIT_FAILURE);
+        }
+
+        // サーバーの証明書を検証するための設定
+        SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, nullptr);
+
+        // 証明書ストアからサーバー証明書を取得
+        X509_STORE* store = SSL_CTX_get_cert_store(ctx);
+        if (store) {
+            HCERTSTORE hCertStore = CertOpenSystemStoreW(0, L"ROOT");
+            if (hCertStore) {
+                PCCERT_CONTEXT pCertContext = nullptr;
+                while ((pCertContext = CertEnumCertificatesInStore(hCertStore, pCertContext))) {
+                    BIO* bio = BIO_new(BIO_s_mem());
+                    if (bio) {
+                        if (PEM_write_bio_X509(bio, pCertContext->pbCertEncoded, pCertContext->cbCertEncoded)) {
+                            X509* cert = PEM_read_bio_X509(bio, nullptr, nullptr, nullptr);
+                            if (cert) {
+                                X509_STORE_add_cert(store, cert);
+                                X509_free(cert);
+                            }
+                        }
+                        BIO_free(bio);
+                    }
+                }
+                CertCloseStore(hCertStore, 0);
+            }
+        }
+    }
+
+    std::string sendMessage(const std::string& message, int timeout) {
+        BIO* bio = BIO_new_connect((serverAddr + ":" + std::to_string(port)).c_str());
+        if (!bio) {
+            std::cerr << "Failed to create connection BIO." << std::endl;
+            exit(EXIT_FAILURE);
+        }
+
+        if (BIO_do_connect(bio) <= 0) {
+            std::cerr << "Failed to connect to the server." << std::endl;
+            exit(EXIT_FAILURE);
+        }
+
+        SSL* ssl = SSL_new(ctx);
+        SSL_set_bio(ssl, bio, bio);
+
+        if (SSL_connect(ssl) <= 0) {
+            std::cerr << "TLS handshake error." << std::endl;
+            SSL_free(ssl);
+            return "";
+        }
+
+        SSL_write(ssl, message.c_str(), message.length());
+
+        auto start_time = std::chrono::steady_clock::now();
+        while (true) {
+            char buffer[4096];
+            int bytes_read = SSL_read(ssl, buffer, sizeof(buffer));
+            if (bytes_read > 0) {
+                std::string received_data(buffer, bytes_read);
+                std::cout << "Received from server: " << received_data << std::endl;
+                SSL_free(ssl);
+                return received_data;
+            } else {
+                auto current_time = std::chrono::steady_clock::now();
+                auto elapsed_time = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count();
+                if (elapsed_time >= timeout) {
+                    std::cerr << "Receive timeout." << std::endl;
+                    SSL_free(ssl);
+                    return "";
+                }
+
+                int error = SSL_get_error(ssl, bytes_read);
+                if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE) {
+                    continue; // 読み込みまたは書き込みを続ける
+                } else {
+                    std::cerr << "SSL read error." << std::endl;
+                    SSL_free(ssl);
+                    return "";
+                }
+            }
+        }
+    }
+
+private:
+    SSL_CTX* ctx;
+    std::string serverAddr = "127.0.0.1"; // サーバーのIPアドレス
+    int port = 8080; // サーバーのポート番号
+};
+
+
+
+
+サーバ
+
+#include <iostream>
+#include <string>
+#include <cstring>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/bio.h>
+#include <openssl/x509.h>
+#include <openssl/pem.h>
+#include <thread>
+
+class TlsServer {
+public:
+    TlsServer() {
+        SSL_load_error_strings();
+        ERR_load_BIO_strings();
+        OpenSSL_add_all_algorithms();
+        SSL_library_init();
+
+        ctx = SSL_CTX_new(TLSv1_2_server_method());
+        if (!ctx) {
+            std::cerr << "Failed to create SSL context." << std::endl;
+            exit(EXIT_FAILURE);
+        }
+
+        // 証明書を設定
+        if (SSL_CTX_use_certificate_file(ctx, "server.crt", SSL_FILETYPE_PEM) <= 0) {
+            std::cerr << "Failed to load server certificate." << std::endl;
+            exit(EXIT_FAILURE);
+        }
+
+        // 秘密鍵を設定
+        if (SSL_CTX_use_PrivateKey_file(ctx, "server.key", SSL_FILETYPE_PEM) <= 0) {
+            std::cerr << "Failed to load server private key." << std::endl;
+            exit(EXIT_FAILURE);
+        }
+
+        // クライアントからの証明書を要求
+        SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, nullptr);
+    }
+
+    void startServer(int port) {
+        BIO* accept_bio = BIO_new_accept(std::to_string(port).c_str());
+        if (!accept_bio) {
+            std::cerr << "Failed to create accept BIO." << std::endl;
+            exit(EXIT_FAILURE);
+        }
+
+        if (BIO_do_accept(accept_bio) <= 0) {
+            std::cerr << "Failed to bind to port " << port << std::endl;
+            exit(EXIT_FAILURE);
+        }
+
+        while (true) {
+            if (BIO_do_accept(accept_bio) <= 0) {
+                std::cerr << "Error in connection." << std::endl;
+                exit(EXIT_FAILURE);
+            }
+
+            BIO* client_bio = BIO_pop(accept_bio);
+            std::thread t(&TlsServer::handleConnection, this, client_bio);
+            t.detach(); // 別スレッドで接続を処理
+        }
+
+        BIO_free(accept_bio);
+    }
+
+private:
+    SSL_CTX* ctx;
+
+    void handleConnection(BIO* bio) {
+        SSL* ssl = SSL_new(ctx);
+        SSL_set_bio(ssl, bio, bio);
+        if (SSL_accept(ssl) <= 0) {
+            std::cerr << "TLS handshake error." << std::endl;
+            SSL_free(ssl);
+            return;
+        }
+
+        char buffer[4096];
+        int bytes_read;
+
+        while (true) {
+            bytes_read = SSL_read(ssl, buffer, sizeof(buffer));
+            if (bytes_read > 0) {
+                std::string received_data(buffer, bytes_read);
+                std::cout << "Received from client: " << received_data << std::endl;
+
+                // クライアントへの応答を送信
+                std::string response = "Received: " + received_data;
+                SSL_write(ssl, response.c_str(), response.length());
+            } else {
+                int error = SSL_get_error(ssl, bytes_read);
+                if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE) {
+                    continue; // 読み込みまたは書き込みを続ける
+                } else {
+                    break; // それ以外のエラーは接続を終了
+                }
+            }
+        }
+
+        SSL_free(ssl);
+    }
+};
