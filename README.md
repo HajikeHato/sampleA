@@ -1,4 +1,6 @@
 1つめ
+
+
 #include <windows.h>
 #include <wincrypt.h>
 #include <iostream>
@@ -56,6 +58,8 @@ int main()
 }
 
 2つめ
+
+
 #include <iostream>
 #include <string>
 #include <windows.h>
