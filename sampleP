@@ -1,0 +1,255 @@
+サーバ.h
+#pragma once
+#include <openssl/ssl.h>
+#include <openssl/bio.h>
+#include <openssl/err.h>
+#include <openssl/conf.h>
+#include <openssl/engine.h>
+#include <windows.h>
+#include <wincrypt.h>
+#include <string>
+#include <thread>
+
+class Server {
+public:
+    Server(const char* cert_thumbprint);
+    ~Server();
+
+    void Init();
+    void Close();
+
+private:
+    void LoadCertificate(const char* cert_thumbprint);
+    void LoadCA();
+    void HandleClient(BIO* client_bio);
+
+    SSL_CTX* ctx_;
+    BIO* accept_bio_;
+};
+
+サーバ.cpp
+#include "Server.h"
+
+Server::Server(const char* cert_thumbprint) {
+    SSL_load_error_strings();
+    OpenSSL_add_ssl_algorithms();
+    ctx_ = SSL_CTX_new(TLS_server_method());
+    LoadCertificate(cert_thumbprint);
+    LoadCA();
+}
+
+Server::~Server() {
+    SSL_CTX_free(ctx_);
+    EVP_cleanup();
+}
+
+void Server::Init() {
+    accept_bio_ = BIO_new_accept("8888");
+    BIO_set_accept_bios(accept_bio_, BIO_new_ssl(ctx_, 0));
+    if (BIO_do_accept(accept_bio_) <= 0) {
+        ERR_print_errors_fp(stderr);
+        throw std::runtime_error("Failed to bind.");
+    }
+}
+
+void Server::Close() {
+    BIO_free(accept_bio_);
+}
+
+void Server::LoadCertificate(const char* cert_thumbprint) {
+    // Same as previous implementation
+    // ...
+}
+
+void Server::LoadCA() {
+    // Same as previous implementation
+    // ...
+}
+
+void Server::HandleClient(BIO* client_bio) {
+    SSL* ssl = (SSL*)BIO_get_ssl(client_bio);
+    if (!ssl) {
+        throw std::runtime_error("SSL connection error.");
+    }
+
+    while (true) {
+        char buffer[1024];
+        int len = SSL_read(ssl, buffer, sizeof(buffer) - 1);
+        if (len <= 0) {
+            ERR_print_errors_fp(stderr);
+            break;
+        }
+        buffer[len] = '\0';
+        std::string request(buffer);
+
+        // Generate response based on the received request
+        // Implement your response generation logic here
+        std::string response = "Server response: " + request;
+
+        // Send response
+        int result = SSL_write(ssl, response.c_str(), response.length());
+        if (result <= 0) {
+            ERR_print_errors_fp(stderr);
+            break;
+        }
+    }
+
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
+}
+
+
+クライアント.cpp
+#include "Client.h"
+
+Client::Client(const char* server_address, int port) {
+    SSL_load_error_strings();
+    OpenSSL_add_ssl_algorithms();
+    ctx_ = SSL_CTX_new(TLS_client_method());
+    LoadCA();
+    bio_ = BIO_new_ssl_connect(ctx_);
+    if (!bio_) {
+        ERR_print_errors_fp(stderr);
+        throw std::runtime_error("Failed to create BIO.");
+    }
+    std::string server_address_str = server_address;
+    server_address_str += ":";
+    server_address_str += std::to_string(port);
+    if (BIO_set_conn_hostname(bio_, server_address_str.c_str()) <= 0) {
+        ERR_print_errors_fp(stderr);
+        throw std::runtime_error("Failed to set server address.");
+    }
+}
+
+Client::~Client() {
+    SSL_CTX_free(ctx_);
+    BIO_free_all(bio_);
+}
+
+void Client::Connect() {
+    if (BIO_do_connect(bio_) <= 0) {
+        ERR_print_errors_fp(stderr);
+        throw std::runtime_error("Failed to connect to the server.");
+    }
+}
+
+void Client::Close() {
+    BIO_free_all(bio_);
+}
+
+std::string Client::SendRequest(const std::string& request) {
+    SSL* ssl = nullptr;
+    BIO_get_ssl(bio_, &ssl);
+    if (!ssl) {
+        throw std::runtime_error("SSL connection error.");
+    }
+
+    // Send request
+    int result = SSL_write(ssl, request.c_str(), request.length());
+    if (result <= 0) {
+        ERR_print_errors_fp(stderr);
+        throw std::runtime_error("Write error.");
+    }
+
+    // Receive response
+    char buffer[1024];
+    result = SSL_read(ssl, buffer, sizeof(buffer) - 1);
+    if (result <= 0) {
+        ERR_print_errors_fp(stderr);
+        throw std::runtime_error("Read error.");
+    }
+    buffer[result] = '\0';
+    std::string response(buffer);
+
+    return response;
+}
+
+void Client::LoadCA() {
+    // Same as previous implementation (if needed)
+    // ...
+}
+
+クライアント.h
+#pragma once
+#include <openssl/ssl.h>
+#include <openssl/bio.h>
+#include <openssl/err.h>
+#include <openssl/conf.h>
+#include <openssl/engine.h>
+#include <string>
+
+class Client {
+public:
+    Client(const char* server_address, int port);
+    ~Client();
+
+    void Connect();
+    void Close();
+    std::string SendRequest(const std::string& request);
+
+private:
+    void LoadCA();
+    SSL_CTX* ctx_;
+    BIO* bio_;
+};
+
+
+メイン.cpp
+
+#include "Server.h"
+#include <iostream>
+#include <thread>
+
+void HandleClient(Server& server, BIO* client_bio) {
+    SSL* ssl = (SSL*)BIO_get_ssl(client_bio);
+    if (!ssl) {
+        throw std::runtime_error("SSL connection error.");
+    }
+
+    while (true) {
+        char buffer[1024];
+        int len = SSL_read(ssl, buffer, sizeof(buffer) - 1);
+        if (len <= 0) {
+            ERR_print_errors_fp(stderr);
+            break;
+        }
+        buffer[len] = '\0';
+        std::string request(buffer);
+
+        // Generate response based on the received request
+        // Implement your response generation logic here
+        std::string response = "Server response: " + request;
+
+        // Send response
+        int result = SSL_write(ssl, response.c_str(), response.length());
+        if (result <= 0) {
+            ERR_print_errors_fp(stderr);
+            break;
+        }
+    }
+
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
+}
+
+int main() {
+    const char* cert_thumbprint = "Your Certificate Thumbprint"; // 証明書のサムプリントを指定してください
+
+    Server server(cert_thumbprint);
+    server.Init();
+
+    while (true) {
+        // クライアントの接続待ち
+        BIO* client_bio = BIO_pop(server.accept_bio_);
+        if (BIO_do_handshake(client_bio) <= 0) {
+            ERR_print_errors_fp(stderr);
+            throw std::runtime_error("Handshake error.");
+        }
+
+        // スレッドを作成してクライアントをハンドリング
+        std::thread(HandleClient, std::ref(server), client_bio).detach();
+    }
+
+    server.Close();
+    return 0;
+}
