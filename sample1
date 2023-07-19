@@ -1,0 +1,107 @@
+#include <iostream>
+#include <vector>
+#include <string>
+#include <windows.h>
+#include <wincrypt.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+#include <openssl/evp.h>
+#include <openssl/ssl.h>
+
+// Windows証明書ストアからPFX形式の秘密鍵を取得する
+bool getPrivateKeyFromCertStore(const std::string& certName, std::vector<uint8_t>& privateKeyData) {
+    HCERTSTORE hCertStore = CertOpenSystemStore(0, "MY");
+    if (hCertStore == NULL) {
+        return false;
+    }
+
+    PCCERT_CONTEXT pCertContext = NULL;
+    while ((pCertContext = CertFindCertificateInStore(
+        hCertStore,
+        X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
+        0,
+        CERT_FIND_SUBJECT_STR,
+        certName.c_str(),
+        pCertContext
+    )) != NULL) {
+        CRYPT_DATA_BLOB pfxData;
+        if (PFXExportCertStoreEx(hCertStore, &pfxData, NULL, NULL, EXPORT_PRIVATE_KEYS)) {
+            privateKeyData.resize(pfxData.cbData);
+            memcpy(privateKeyData.data(), pfxData.pbData, pfxData.cbData);
+            PFXFreeMemory(&pfxData);
+            CertFreeCertificateContext(pCertContext);
+            CertCloseStore(hCertStore, 0);
+            return true;
+        }
+    }
+
+    CertCloseStore(hCertStore, 0);
+    return false;
+}
+
+// PEM形式の秘密鍵を読み込む
+EVP_PKEY* loadPrivateKeyFromPEM(const std::vector<uint8_t>& privateKeyData, const std::string& password) {
+    BIO* bio = BIO_new_mem_buf(privateKeyData.data(), privateKeyData.size());
+    if (bio == NULL) {
+        return NULL;
+    }
+
+    EVP_PKEY* privateKey = PEM_read_bio_PrivateKey(bio, NULL, NULL, (void*)password.c_str());
+    BIO_free(bio);
+    return privateKey;
+}
+
+// PEM形式のルート証明書を読み込む
+X509* loadRootCertificate(const std::string& rootCertPath) {
+    FILE* fp = fopen(rootCertPath.c_str(), "r");
+    if (fp == NULL) {
+        // エラーハンドリング
+        return NULL;
+    }
+
+    X509* rootCert = PEM_read_X509(fp, NULL, NULL, NULL);
+    fclose(fp);
+    return rootCert;
+}
+
+int main() {
+    SSL_library_init();
+
+    // 証明書名
+    std::string certName = "証明書の名前";
+
+    // 秘密鍵の取得
+    std::vector<uint8_t> privateKeyData;
+    if (!getPrivateKeyFromCertStore(certName, privateKeyData)) {
+        std::cerr << "秘密鍵の取得に失敗しました。" << std::endl;
+        return 1;
+    }
+
+    // PEM形式の秘密鍵のパスワード（必要に応じて設定してください）
+    std::string password = "";
+
+    // PEM形式の秘密鍵の読み込み
+    EVP_PKEY* privateKey = loadPrivateKeyFromPEM(privateKeyData, password);
+    if (privateKey == NULL) {
+        std::cerr << "秘密鍵の読み込みに失敗しました。" << std::endl;
+        return 1;
+    }
+
+    // ルート証明書の読み込み（任意）
+    X509* rootCert = loadRootCertificate("ルート証明書のパス");
+
+    // SSLコンテキストの作成と設定
+    SSL_CTX* sslContext = SSL_CTX_new(TLS_method());
+    SSL_CTX_use_certificate(sslContext, NULL); // 証明書の設定は不要です
+    SSL_CTX_use_PrivateKey(sslContext, privateKey);
+    SSL_CTX_add_client_CA(sslContext, rootCert);
+
+    // ここでSSLコンテキストを使用した処理を行う
+
+    // 後片付け
+    SSL_CTX_free(sslContext);
+    EVP_PKEY_free(privateKey);
+    X509_free(rootCert);
+
+    return 0;
+}
