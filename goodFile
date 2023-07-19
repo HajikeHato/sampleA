@@ -1,0 +1,349 @@
+ヘッダ
+
+#pragma once
+
+#include <string>
+#include <mutex>
+
+class ClientHandler;
+
+class Server {
+public:
+    // コンストラクタ
+    Server(const std::string& cert_file, const std::string& key_file, int port);
+    // デストラクタ
+    ~Server();
+
+    // サーバの初期化
+    bool Initialize();
+    // サーバを起動し、クライアント接続の待ち受けを開始
+    void Start();
+
+    // クライアントにデータを送信する
+    void SendData(ClientHandler* client, const std::string& data);
+    // クライアントからデータを受信する
+    std::string ReceiveData(ClientHandler* client);
+
+private:
+    // OpenSSLコンテキスト
+    SSL_CTX* ctx_;
+    // サーバ証明書ファイルのパス
+    std::string cert_file_;
+    // サーバ秘密鍵ファイルのパス
+    std::string key_file_;
+    // サーバポート番号
+    int port_;
+    // OpenSSLライブラリの初期化と終了処理の排他制御用mutex
+    std::mutex openssl_mutex;
+
+    // サーバソケットの作成とバインド
+    int CreateServerSocket();
+    // クライアントのリクエストを処理するメソッド（別スレッドで実行される）
+    void HandleClient(SSL* ssl);
+
+    // クライアントハンドラのリスト
+    std::vector<std::unique_ptr<ClientHandler>> clients_;
+};
+
+
+ソース
+#include "server.h"
+#include <iostream>
+#include <thread>
+#include <vector>
+#include <memory>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
+class ClientHandler {
+public:
+    // コンストラクタ
+    ClientHandler(SSL* ssl) : ssl_(ssl) {}
+    // デストラクタ
+    ~ClientHandler() {
+        SSL_shutdown(ssl_);
+        SSL_free(ssl_);
+    }
+
+    // クライアントにデータを送信する
+    void SendData(const std::string& data) {
+        SSL_write(ssl_, data.c_str(), data.size());
+    }
+
+    // クライアントからデータを受信する
+    std::string ReceiveData() {
+        char buffer[1024];
+        int bytes = SSL_read(ssl_, buffer, sizeof(buffer));
+        if (bytes > 0) {
+            return std::string(buffer, bytes);
+        }
+        return "";
+    }
+
+    // クライアントに関連するSSLコンテキストを取得する
+    SSL* GetSSL() const { return ssl_; }
+
+private:
+    SSL* ssl_;
+};
+
+// コンストラクタ
+Server::Server(const std::string& cert_file, const std::string& key_file, int port)
+    : cert_file_(cert_file), key_file_(key_file), port_(port), ctx_(nullptr) {}
+
+// デストラクタ
+Server::~Server() {
+    if (ctx_) {
+        SSL_CTX_free(ctx_);
+    }
+}
+
+// サーバの初期化
+bool Server::Initialize() {
+    // OpenSSLライブラリの初期化
+    SSL_library_init();
+    OpenSSL_add_all_algorithms();
+    SSL_load_error_strings();
+
+    // SSLコンテキストの作成
+    ctx_ = SSL_CTX_new(SSLv23_method());
+    if (!ctx_) {
+        return false;
+    }
+
+    // クライアントの証明書要求を有効にする
+    SSL_CTX_set_verify(ctx_, SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT, nullptr);
+
+    // サーバ証明書と秘密鍵の設定
+    if (SSL_CTX_use_certificate_file(ctx_, cert_file_.c_str(), SSL_FILETYPE_PEM) <= 0) {
+        return false;
+    }
+
+    if (SSL_CTX_use_PrivateKey_file(ctx_, key_file_.c_str(), SSL_FILETYPE_PEM) <= 0) {
+        return false;
+    }
+
+    // 秘密鍵のチェック
+    if (!SSL_CTX_check_private_key(ctx_)) {
+        return false;
+    }
+
+    return true;
+}
+
+// サーバを起動し、クライアント接続の待ち受けを開始
+void Server::Start() {
+    // サーバソケットの作成とバインド
+    int server_socket = CreateServerSocket();
+    if (server_socket < 0) {
+        std::cerr << "Error creating server socket." << std::endl;
+        return;
+    }
+
+    std::cout << "Server is running on port " << port_ << std::endl;
+
+    while (true) {
+        struct sockaddr_in client_addr;
+        socklen_t client_len = sizeof(client_addr);
+        int client_socket = accept(server_socket, (struct sockaddr*)&client_addr, &client_len);
+
+        if (client_socket < 0) {
+            std::cerr << "Error accepting client connection." << std::endl;
+            continue;
+        }
+
+        std::cout << "Client connected." << std::endl;
+
+        // 新しいSSLコンテキストの作成
+        SSL* ssl = SSL_new(ctx_);
+        SSL_set_fd(ssl, client_socket);
+
+        // OpenSSLライブラリの関数がスレッドセーフでないため、排他制御を行う
+        {
+            std::lock_guard<std::mutex> lock(openssl_mutex);
+            SSL_accept(ssl);
+        }
+
+        // 新しいクライアントハンドラをリストに追加
+        clients_.emplace_back(std::make_unique<ClientHandler>(ssl));
+
+        // クライアントの処理を別スレッドで実行
+        std::thread client_thread(&Server::HandleClient, this, ssl);
+        client_thread.detach();
+    }
+
+    close(server_socket);
+}
+
+// クライアントにデータを送信する
+void Server::SendData(ClientHandler* client, const std::string& data) {
+    client->SendData(data);
+}
+
+// クライアントからデータを受信する
+std::string Server::ReceiveData(ClientHandler* client) {
+    return client->ReceiveData();
+}
+
+// サーバソケットの作成とバインド
+int Server::CreateServerSocket() {
+    int server_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_socket < 0) {
+        return -1;
+    }
+
+    struct sockaddr_in server_addr;
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(port_);
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+
+    if (bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+        return -1;
+    }
+
+    listen(server_socket, 5);
+
+    return server_socket;
+}
+
+// クライアントのリクエストを処理するメソッド（別スレッドで実行される）
+void Server::HandleClient(SSL* ssl) {
+    ClientHandler* client = nullptr;
+
+    // クライアントハンドラを探す
+    for (const auto& c : clients_) {
+        if (c->GetSSL() == ssl) {
+            client = c.get();
+            break;
+        }
+    }
+
+    if (!client) {
+        std::cerr << "Error: Client handler not found." << std::endl;
+        return;
+    }
+
+    // クライアントからのリクエストとレスポンスを処理する例
+    std::string request = ReceiveData(client);
+    std::cout << "Received: " << request << std::endl;
+
+    std::string response = "Hello from the server!";
+    SendData(client, response);
+
+    std::cout << "Sent: " << response << std::endl;
+}
+
+
+
+ヘッダ
+#pragma once
+
+#include <string>
+
+class Client {
+public:
+    Client(const std::string& cert_file, const std::string& key_file);
+    ~Client();
+
+    // サーバに接続
+    bool Connect(const std::string& server_ip, int port);
+    // サーバにデータを送信
+    void SendData(const std::string& data);
+    // サーバからデータを受信
+    std::string ReceiveData();
+
+private:
+    SSL_CTX* ctx_;
+    SSL* ssl_;
+};
+
+
+クライアント
+
+#include "client.h"
+#include <iostream>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
+Client::Client(const std::string& cert_file, const std::string& key_file)
+    : ctx_(nullptr), ssl_(nullptr) {
+    SSL_library_init();
+    OpenSSL_add_all_algorithms();
+    SSL_load_error_strings();
+
+    ctx_ = SSL_CTX_new(SSLv23_method());
+    if (!ctx_) {
+        std::cerr << "Error creating SSL context." << std::endl;
+        return;
+    }
+
+    // サーバの証明書と秘密鍵の設定
+    if (SSL_CTX_use_certificate_file(ctx_, cert_file.c_str(), SSL_FILETYPE_PEM) <= 0) {
+        std::cerr << "Error loading certificate file." << std::endl;
+        return;
+    }
+
+    if (SSL_CTX_use_PrivateKey_file(ctx_, key_file.c_str(), SSL_FILETYPE_PEM) <= 0) {
+        std::cerr << "Error loading private key file." << std::endl;
+        return;
+    }
+}
+
+Client::~Client() {
+    if (ssl_) {
+        SSL_shutdown(ssl_);
+        SSL_free(ssl_);
+    }
+
+    if (ctx_) {
+        SSL_CTX_free(ctx_);
+    }
+}
+
+bool Client::Connect(const std::string& server_ip, int port) {
+    int client_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (client_socket < 0) {
+        std::cerr << "Error creating client socket." << std::endl;
+        return false;
+    }
+
+    struct sockaddr_in server_addr;
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, server_ip.c_str(), &(server_addr.sin_addr)) <= 0) {
+        std::cerr << "Invalid server IP address." << std::endl;
+        close(client_socket);
+        return false;
+    }
+
+    if (connect(client_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+        std::cerr << "Connection failed." << std::endl;
+        close(client_socket);
+        return false;
+    }
+
+    ssl_ = SSL_new(ctx_);
+    SSL_set_fd(ssl_, client_socket);
+
+    if (SSL_connect(ssl_) != 1) {
+        std::cerr << "SSL handshake failed." << std::endl;
+        SSL_free(ssl_);
+        close(client_socket);
+        return false;
+    }
+
+    return true;
+}
+
+void Client::SendData(const std::string& data) {
+    SSL_write(ssl_, data.c_str(), data.size());
+}
+
+std::string Client::ReceiveData() {
+    char buffer[1024];
+    int bytes = SSL_read(ssl_, buffer, sizeof(buffer));
+    if (bytes > 0) {
+        return std::string(buffer, bytes);
+    }
+    return "";
+}
