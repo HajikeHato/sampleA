@@ -40,8 +40,9 @@ int main() {
         return 1;
     }
 
-    HCRYPTPROV hCryptProv;
-    if (!CryptAcquireCertificatePrivateKey(pCertContext, 0, NULL, &hCryptProv, NULL, NULL)) {
+    HCRYPTPROV_OR_NCRYPT_KEY_HANDLE hCryptProv;
+    DWORD dwKeySpec;
+    if (!CryptAcquireCertificatePrivateKey(pCertContext, 0, NULL, &hCryptProv, &dwKeySpec, NULL)) {
         std::cerr << "Failed to acquire private key for server certificate." << std::endl;
         CertFreeCertificateContext(pCertContext);
         CertCloseStore(hCertStore, 0);
@@ -51,23 +52,52 @@ int main() {
     EVP_PKEY* pkey = EVP_PKEY_new();
     if (!pkey) {
         std::cerr << "Failed to create EVP_PKEY object." << std::endl;
-        CryptReleaseContext(hCryptProv, 0);
         CertFreeCertificateContext(pCertContext);
         CertCloseStore(hCertStore, 0);
         return 1;
     }
 
-    EC_KEY* ec_key = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
+    EC_KEY* ec_key = EVP_PKEY_get1_EC_KEY(pkey);
     if (!ec_key) {
         std::cerr << "Failed to create EC_KEY object." << std::endl;
         EVP_PKEY_free(pkey);
-        CryptReleaseContext(hCryptProv, 0);
         CertFreeCertificateContext(pCertContext);
         CertCloseStore(hCertStore, 0);
         return 1;
     }
 
-    EC_KEY_set_private_key(ec_key, BN_bin2bn(hCryptProv, sizeof(hCryptProv), NULL));
+    if (!CryptExportKey(hCryptProv, NULL, PRIVATEKEYBLOB, 0, NULL, &dwKeySize)) {
+        std::cerr << "Failed to get the size of the private key." << std::endl;
+        EVP_PKEY_free(pkey);
+        EC_KEY_free(ec_key);
+        CertFreeCertificateContext(pCertContext);
+        CertCloseStore(hCertStore, 0);
+        return 1;
+    }
+
+    std::vector<BYTE> privateKeyBlob(dwKeySize);
+    if (!CryptExportKey(hCryptProv, NULL, PRIVATEKEYBLOB, 0, &privateKeyBlob[0], &dwKeySize)) {
+        std::cerr << "Failed to export the private key." << std::endl;
+        EVP_PKEY_free(pkey);
+        EC_KEY_free(ec_key);
+        CertFreeCertificateContext(pCertContext);
+        CertCloseStore(hCertStore, 0);
+        return 1;
+    }
+
+    BIGNUM* bn = BN_bin2bn(&privateKeyBlob[0], dwKeySize, NULL);
+    if (!bn) {
+        std::cerr << "Failed to create BIGNUM from the private key." << std::endl;
+        EVP_PKEY_free(pkey);
+        EC_KEY_free(ec_key);
+        CertFreeCertificateContext(pCertContext);
+        CertCloseStore(hCertStore, 0);
+        return 1;
+    }
+
+    EC_KEY_set_private_key(ec_key, bn);
+    BN_free(bn);
+
     EVP_PKEY_assign_EC_KEY(pkey, ec_key);
 
     if (SSL_CTX_use_PrivateKey(ssl_ctx, pkey) != 1) {
