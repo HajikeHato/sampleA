@@ -1,3 +1,21 @@
+動かす場合
+
+ServerController serverController;
+
+if (!serverController.startServer())
+{
+    std::cerr << "Failed to start the server." << std::endl;
+    return 1;
+}
+
+// クライアント受信監視
+serverController.listenForClients();
+
+serverController.stopServer();
+
+return 0;
+
+
 ヘッダ
 
 #pragma once
