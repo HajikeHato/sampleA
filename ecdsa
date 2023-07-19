@@ -1,164 +1,100 @@
-#include "Server.h"
+多分公開鍵情報セットしたほうがいいかも？
+    EC_KEY* ec_key = EVP_PKEY_get1_EC_KEY(pCertContext->pCertInfo->SubjectPublicKeyInfo.PublicKey);
+    if (!ec_key) {
+        std::cerr << "Failed to get ECDSA private key from certificate." << std::endl;
+        CertFreeCertificateContext(pCertContext);
+        CertCloseStore(hCertStore, 0);
+        return 1;
+    }
 
-Server::Server(const char* cert_thumbprint) {
+
+----------------------------------------------------------------------------------------------
+#include <iostream>
+#include <windows.h>
+#include <wincrypt.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/ec.h>
+
+int main() {
+    SSL_library_init();
+    OpenSSL_add_all_algorithms();
     SSL_load_error_strings();
-    OpenSSL_add_ssl_algorithms();
-    ctx_ = SSL_CTX_new(TLS_server_method());
-    LoadCertificate(cert_thumbprint);
-    LoadCA();
-}
 
-Server::~Server() {
-    SSL_CTX_free(ctx_);
-    EVP_cleanup();
-}
-
-void Server::Init() {
-    accept_bio_ = BIO_new_accept("8888");
-    BIO_set_accept_bios(accept_bio_, BIO_new_ssl(ctx_, 0));
-    if (BIO_do_accept(accept_bio_) <= 0) {
-        ERR_print_errors_fp(stderr);
-        throw std::runtime_error("Failed to bind.");
+    SSL_CTX* ssl_ctx = SSL_CTX_new(TLSv1_2_server_method());
+    if (!ssl_ctx) {
+        std::cerr << "SSL context creation failed." << std::endl;
+        return 1;
     }
-}
 
-void Server::Run() {
-    while (true) {
-        if (BIO_do_accept(accept_bio_) <= 0) {
-            ERR_print_errors_fp(stderr);
-            throw std::runtime_error("Accept error.");
-        }
-        BIO* client_bio = BIO_pop(accept_bio_);
-        if (BIO_do_handshake(client_bio) <= 0) {
-            ERR_print_errors_fp(stderr);
-            throw std::runtime_error("Handshake error.");
-        }
-        SSL* ssl = (SSL*)BIO_get_ssl(client_bio);
-        if (!ssl) {
-            throw std::runtime_error("SSL connection error.");
-        }
-        HandleClient(ssl);
-    }
-}
-
-void Server::Close() {
-    BIO_free(accept_bio_);
-}
-
-void Server::LoadCertificate(const char* cert_thumbprint) {
-    PCCERT_CONTEXT pCertContext = nullptr;
-    HCERTSTORE hCertStore = CertOpenSystemStore(NULL, "MY");
+    HCERTSTORE hCertStore = CertOpenSystemStore(0, "MY");
     if (!hCertStore) {
-        throw std::runtime_error("Failed to open certificate store.");
+        std::cerr << "Failed to open certificate store." << std::endl;
+        return 1;
     }
 
-    // Specify the subject of the certificate you want to retrieve (or use any other criteria)
-    pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_SUBJECT_STR, cert_thumbprint, nullptr);
+    PCCERT_CONTEXT pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_SUBJECT_STR, L"Your_Server_Certificate_Common_Name", NULL);
     if (!pCertContext) {
+        std::cerr << "Failed to find server certificate in store." << std::endl;
         CertCloseStore(hCertStore, 0);
-        throw std::runtime_error("Failed to find certificate.");
+        return 1;
     }
 
-    // Get the handle to the private key associated with the certificate
-    NCRYPT_KEY_HANDLE hPrivateKey;
-    if (NCryptOpenKey(pCertContext->hCertStore, &hPrivateKey, pCertContext->pszObjId, 0, CRYPT_EXPORTABLE) != ERROR_SUCCESS) {
+    HCRYPTPROV hCryptProv;
+    if (!CryptAcquireCertificatePrivateKey(pCertContext, 0, NULL, &hCryptProv, NULL, NULL)) {
+        std::cerr << "Failed to acquire private key for server certificate." << std::endl;
         CertFreeCertificateContext(pCertContext);
         CertCloseStore(hCertStore, 0);
-        throw std::runtime_error("Failed to open private key.");
+        return 1;
     }
 
-    // Export the certificate and private key to a PKCS#12 blob
-    CRYPT_DATA_BLOB pfxBlob;
-    if (PFXExportCertStore(pCertContext->hCertStore, &pfxBlob, L"Your PKCS12 Password", EXPORT_PRIVATE_KEYS) == FALSE) {
-        NCryptFreeObject(hPrivateKey);
+    EVP_PKEY* pkey = EVP_PKEY_new();
+    if (!pkey) {
+        std::cerr << "Failed to create EVP_PKEY object." << std::endl;
+        CryptReleaseContext(hCryptProv, 0);
         CertFreeCertificateContext(pCertContext);
         CertCloseStore(hCertStore, 0);
-        throw std::runtime_error("Failed to export certificate and private key.");
+        return 1;
     }
 
-    // Load the PKCS#12 blob into OpenSSL's SSL_CTX
-    BIO* pfxBio = BIO_new_mem_buf(pfxBlob.pbData, pfxBlob.cbData);
-    PKCS12* p12 = d2i_PKCS12_bio(pfxBio, nullptr);
-    BIO_free(pfxBio);
-    if (!p12) {
-        NCryptFreeObject(hPrivateKey);
+    EC_KEY* ec_key = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
+    if (!ec_key) {
+        std::cerr << "Failed to create EC_KEY object." << std::endl;
+        EVP_PKEY_free(pkey);
+        CryptReleaseContext(hCryptProv, 0);
         CertFreeCertificateContext(pCertContext);
         CertCloseStore(hCertStore, 0);
-        throw std::runtime_error("Failed to parse PKCS#12 blob.");
+        return 1;
     }
 
-    EVP_PKEY* pkey;
-    X509* x509;
-    if (PKCS12_parse(p12, "Your PKCS12 Password", &pkey, &x509, nullptr) <= 0) {
-        NCryptFreeObject(hPrivateKey);
+    EC_KEY_set_private_key(ec_key, BN_bin2bn(hCryptProv, sizeof(hCryptProv), NULL));
+    EVP_PKEY_assign_EC_KEY(pkey, ec_key);
+
+    if (SSL_CTX_use_PrivateKey(ssl_ctx, pkey) != 1) {
+        std::cerr << "Failed to set private key in SSL context." << std::endl;
+        EVP_PKEY_free(pkey);
         CertFreeCertificateContext(pCertContext);
         CertCloseStore(hCertStore, 0);
-        PKCS12_free(p12);
-        throw std::runtime_error("Failed to parse PKCS#12 data.");
+        return 1;
     }
 
-    if (SSL_CTX_use_certificate(ctx_, x509) <= 0) {
-        NCryptFreeObject(hPrivateKey);
+    // 証明書チェーンの設定
+    if (SSL_CTX_use_certificate_chain_file(ssl_ctx, "Your_Certificate_Chain.pem") != 1) {
+        std::cerr << "Failed to set certificate chain in SSL context." << std::endl;
+        EVP_PKEY_free(pkey);
         CertFreeCertificateContext(pCertContext);
         CertCloseStore(hCertStore, 0);
-        PKCS12_free(p12);
-        X509_free(x509);
-        ERR_print_errors_fp(stderr);
-        throw std::runtime_error("Failed to load certificate.");
+        return 1;
     }
 
-    if (SSL_CTX_use_PrivateKey(ctx_, pkey) <= 0) {
-        NCryptFreeObject(hPrivateKey);
-        CertFreeCertificateContext(pCertContext);
-        CertCloseStore(hCertStore, 0);
-        PKCS12_free(p12);
-        X509_free(x509);
-        ERR_print_errors_fp(stderr);
-        throw std::runtime_error("Failed to load private key.");
-    }
-
-    NCryptFreeObject(hPrivateKey);
-    CertFreeCertificateContext(pCertContext);
-    CertCloseStore(hCertStore, 0);
-    PKCS12_free(p12);
-    X509_free(x509);
-}
-
-void Server::LoadCA() {
-    HCERTSTORE hCertStore = CertOpenSystemStore(NULL, "ROOT");
-    if (!hCertStore) {
-        throw std::runtime_error("Failed to open root certificate store.");
-    }
-
-    X509_STORE* store = SSL_CTX_get_cert_store(ctx_);
-    PCCERT_CONTEXT pCertContext = nullptr;
-    while ((pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_ANY, nullptr, pCertContext))) {
-        X509* x509 = d2i_X509(NULL, (const unsigned char**)&pCertContext->pbCertEncoded, pCertContext->cbCertEncoded);
-        if (!x509) {
-            continue;
-        }
-        X509_STORE_add_cert(store, x509);
-        X509_free(x509);
-    }
-
-    CertCloseStore(hCertStore, 0);
-}
-
-void Server::HandleClient(SSL* ssl) {
-    // Handle incoming commands and respond accordingly.
-    // Example implementation:
-    char buffer[1024];
-    int len = SSL_read(ssl, buffer, sizeof(buffer) - 1);
-    if (len <= 0) {
-        ERR_print_errors_fp(stderr);
-        throw std::runtime_error("Read error.");
-    }
-    buffer[len] = '\0';
-    std::string command(buffer);
-    // Process the command and send response if necessary.
-    // Implement your command handling logic here.
+    // ソケットのセットアップと接続待機
     // ...
 
-    SSL_shutdown(ssl);
-    SSL_free(ssl);
+    // SSL接続の確立と通信の実行
+    // ...
+
+    // クリーンアップ
+    // ...
+
+    return 0;
 }
