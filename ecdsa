@@ -1,0 +1,164 @@
+#include "Server.h"
+
+Server::Server(const char* cert_thumbprint) {
+    SSL_load_error_strings();
+    OpenSSL_add_ssl_algorithms();
+    ctx_ = SSL_CTX_new(TLS_server_method());
+    LoadCertificate(cert_thumbprint);
+    LoadCA();
+}
+
+Server::~Server() {
+    SSL_CTX_free(ctx_);
+    EVP_cleanup();
+}
+
+void Server::Init() {
+    accept_bio_ = BIO_new_accept("8888");
+    BIO_set_accept_bios(accept_bio_, BIO_new_ssl(ctx_, 0));
+    if (BIO_do_accept(accept_bio_) <= 0) {
+        ERR_print_errors_fp(stderr);
+        throw std::runtime_error("Failed to bind.");
+    }
+}
+
+void Server::Run() {
+    while (true) {
+        if (BIO_do_accept(accept_bio_) <= 0) {
+            ERR_print_errors_fp(stderr);
+            throw std::runtime_error("Accept error.");
+        }
+        BIO* client_bio = BIO_pop(accept_bio_);
+        if (BIO_do_handshake(client_bio) <= 0) {
+            ERR_print_errors_fp(stderr);
+            throw std::runtime_error("Handshake error.");
+        }
+        SSL* ssl = (SSL*)BIO_get_ssl(client_bio);
+        if (!ssl) {
+            throw std::runtime_error("SSL connection error.");
+        }
+        HandleClient(ssl);
+    }
+}
+
+void Server::Close() {
+    BIO_free(accept_bio_);
+}
+
+void Server::LoadCertificate(const char* cert_thumbprint) {
+    PCCERT_CONTEXT pCertContext = nullptr;
+    HCERTSTORE hCertStore = CertOpenSystemStore(NULL, "MY");
+    if (!hCertStore) {
+        throw std::runtime_error("Failed to open certificate store.");
+    }
+
+    // Specify the subject of the certificate you want to retrieve (or use any other criteria)
+    pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_SUBJECT_STR, cert_thumbprint, nullptr);
+    if (!pCertContext) {
+        CertCloseStore(hCertStore, 0);
+        throw std::runtime_error("Failed to find certificate.");
+    }
+
+    // Get the handle to the private key associated with the certificate
+    NCRYPT_KEY_HANDLE hPrivateKey;
+    if (NCryptOpenKey(pCertContext->hCertStore, &hPrivateKey, pCertContext->pszObjId, 0, CRYPT_EXPORTABLE) != ERROR_SUCCESS) {
+        CertFreeCertificateContext(pCertContext);
+        CertCloseStore(hCertStore, 0);
+        throw std::runtime_error("Failed to open private key.");
+    }
+
+    // Export the certificate and private key to a PKCS#12 blob
+    CRYPT_DATA_BLOB pfxBlob;
+    if (PFXExportCertStore(pCertContext->hCertStore, &pfxBlob, L"Your PKCS12 Password", EXPORT_PRIVATE_KEYS) == FALSE) {
+        NCryptFreeObject(hPrivateKey);
+        CertFreeCertificateContext(pCertContext);
+        CertCloseStore(hCertStore, 0);
+        throw std::runtime_error("Failed to export certificate and private key.");
+    }
+
+    // Load the PKCS#12 blob into OpenSSL's SSL_CTX
+    BIO* pfxBio = BIO_new_mem_buf(pfxBlob.pbData, pfxBlob.cbData);
+    PKCS12* p12 = d2i_PKCS12_bio(pfxBio, nullptr);
+    BIO_free(pfxBio);
+    if (!p12) {
+        NCryptFreeObject(hPrivateKey);
+        CertFreeCertificateContext(pCertContext);
+        CertCloseStore(hCertStore, 0);
+        throw std::runtime_error("Failed to parse PKCS#12 blob.");
+    }
+
+    EVP_PKEY* pkey;
+    X509* x509;
+    if (PKCS12_parse(p12, "Your PKCS12 Password", &pkey, &x509, nullptr) <= 0) {
+        NCryptFreeObject(hPrivateKey);
+        CertFreeCertificateContext(pCertContext);
+        CertCloseStore(hCertStore, 0);
+        PKCS12_free(p12);
+        throw std::runtime_error("Failed to parse PKCS#12 data.");
+    }
+
+    if (SSL_CTX_use_certificate(ctx_, x509) <= 0) {
+        NCryptFreeObject(hPrivateKey);
+        CertFreeCertificateContext(pCertContext);
+        CertCloseStore(hCertStore, 0);
+        PKCS12_free(p12);
+        X509_free(x509);
+        ERR_print_errors_fp(stderr);
+        throw std::runtime_error("Failed to load certificate.");
+    }
+
+    if (SSL_CTX_use_PrivateKey(ctx_, pkey) <= 0) {
+        NCryptFreeObject(hPrivateKey);
+        CertFreeCertificateContext(pCertContext);
+        CertCloseStore(hCertStore, 0);
+        PKCS12_free(p12);
+        X509_free(x509);
+        ERR_print_errors_fp(stderr);
+        throw std::runtime_error("Failed to load private key.");
+    }
+
+    NCryptFreeObject(hPrivateKey);
+    CertFreeCertificateContext(pCertContext);
+    CertCloseStore(hCertStore, 0);
+    PKCS12_free(p12);
+    X509_free(x509);
+}
+
+void Server::LoadCA() {
+    HCERTSTORE hCertStore = CertOpenSystemStore(NULL, "ROOT");
+    if (!hCertStore) {
+        throw std::runtime_error("Failed to open root certificate store.");
+    }
+
+    X509_STORE* store = SSL_CTX_get_cert_store(ctx_);
+    PCCERT_CONTEXT pCertContext = nullptr;
+    while ((pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_ANY, nullptr, pCertContext))) {
+        X509* x509 = d2i_X509(NULL, (const unsigned char**)&pCertContext->pbCertEncoded, pCertContext->cbCertEncoded);
+        if (!x509) {
+            continue;
+        }
+        X509_STORE_add_cert(store, x509);
+        X509_free(x509);
+    }
+
+    CertCloseStore(hCertStore, 0);
+}
+
+void Server::HandleClient(SSL* ssl) {
+    // Handle incoming commands and respond accordingly.
+    // Example implementation:
+    char buffer[1024];
+    int len = SSL_read(ssl, buffer, sizeof(buffer) - 1);
+    if (len <= 0) {
+        ERR_print_errors_fp(stderr);
+        throw std::runtime_error("Read error.");
+    }
+    buffer[len] = '\0';
+    std::string command(buffer);
+    // Process the command and send response if necessary.
+    // Implement your command handling logic here.
+    // ...
+
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
+}
