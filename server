@@ -20,9 +20,12 @@ return 0;
 
 #pragma once
 
+#include <string>
+#include <Winsock2.h>
 #include <openssl/ssl.h>
 #include <openssl/bio.h>
-#include <string>
+
+#pragma comment(lib, "ws2_32.lib")
 
 class ServerController
 {
@@ -38,9 +41,9 @@ public:
 
 private:
     SSL_CTX* ctx;
-    int serverSocket;
+    SOCKET serverSocket;
     SSL* ssl;
-    int clientSocket;
+    SOCKET clientSocket;
 
     void initializeSSL();
     void loadCertificates();
@@ -51,15 +54,17 @@ private:
 
 ソース
 #include "ServerController.h"
-
 #include <iostream>
-#include <cstring>
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
 
 ServerController::ServerController()
 {
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
+    {
+        std::cerr << "Failed to initialize Winsock." << std::endl;
+        return;
+    }
+
     initializeSSL();
     loadCertificates();
 }
@@ -67,36 +72,37 @@ ServerController::ServerController()
 ServerController::~ServerController()
 {
     cleanupSSL();
+    closesocket(serverSocket);
+    WSACleanup();
 }
 
 bool ServerController::startServer()
 {
     // ソケットの作成とバインド
     serverSocket = socket(AF_INET, SOCK_STREAM, 0);
-    if (serverSocket == -1)
+    if (serverSocket == INVALID_SOCKET)
     {
         std::cerr << "Failed to create socket." << std::endl;
         return false;
     }
 
     sockaddr_in serverAddr;
-    std::memset(&serverAddr, 0, sizeof(serverAddr));
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_addr.s_addr = INADDR_ANY;
     serverAddr.sin_port = htons(8888);
 
-    if (bind(serverSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == -1)
+    if (bind(serverSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR)
     {
         std::cerr << "Failed to bind socket." << std::endl;
-        close(serverSocket);
+        closesocket(serverSocket);
         return false;
     }
 
     // サーバのリスニング
-    if (listen(serverSocket, 5) == -1)
+    if (listen(serverSocket, 5) == SOCKET_ERROR)
     {
         std::cerr << "Failed to listen." << std::endl;
-        close(serverSocket);
+        closesocket(serverSocket);
         return false;
     }
 
@@ -106,7 +112,29 @@ bool ServerController::startServer()
 void ServerController::stopServer()
 {
     // ソケットをクローズ
-    close(serverSocket);
+    closesocket(serverSocket);
+}
+
+void ServerController::acceptClientConnection()
+{
+    sockaddr_in clientAddr;
+    int addrLen = sizeof(clientAddr);
+    clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddr, &addrLen);
+    if (clientSocket == INVALID_SOCKET)
+    {
+        std::cerr << "Failed to accept client connection." << std::endl;
+        return;
+    }
+
+    // SSLコンテキストを作成し、ソケットをSSL化
+    ssl = SSL_new(ctx);
+    SSL_set_fd(ssl, clientSocket);
+    if (SSL_accept(ssl) <= 0)
+    {
+        std::cerr << "SSL handshake error." << std::endl;
+        closesocket(clientSocket);
+        return;
+    }
 }
 
 bool ServerController::sendCommand(const std::string& commandData)
@@ -117,7 +145,6 @@ bool ServerController::sendCommand(const std::string& commandData)
         return false;
     }
 
-    // コマンドデータの送信
     int bytesSent = SSL_write(ssl, commandData.c_str(), commandData.size());
     if (bytesSent <= 0)
     {
@@ -138,11 +165,9 @@ std::string ServerController::receiveCommand()
         return receivedData;
     }
 
-    // バッファサイズ
     const int bufferSize = 1024;
     char buffer[bufferSize];
 
-    // コマンドデータの受信
     int bytesRead = SSL_read(ssl, buffer, bufferSize - 1);
     if (bytesRead <= 0)
     {
@@ -150,7 +175,6 @@ std::string ServerController::receiveCommand()
         return receivedData;
     }
 
-    // 受信したデータを文字列としてセット
     buffer[bytesRead] = '\0';
     receivedData = buffer;
 
@@ -161,7 +185,6 @@ void ServerController::listenForClients()
 {
     acceptClientConnection();
 
-    // クライアントとの通信処理
     while (true)
     {
         std::string receivedData = receiveCommand();
@@ -169,78 +192,5 @@ void ServerController::listenForClients()
         {
             std::cout << "Received command from client: " << receivedData << std::endl;
         }
-        // 他の処理や終了条件を追加することもできます
-    }
-}
-
-void ServerController::initializeSSL()
-{
-    SSL_library_init();
-    SSL_load_error_strings();
-    OpenSSL_add_all_algorithms();
-
-    ctx = SSL_CTX_new(TLSv1_2_server_method());
-    if (!ctx)
-    {
-        std::cerr << "Failed to create SSL context." << std::endl;
-        // エラーハンドリング
-        // SSL_CTX_newが失敗した場合の処理を記述してください
-    }
-}
-
-void ServerController::loadCertificates()
-{
-    if (SSL_CTX_use_certificate_file(ctx, "server.crt", SSL_FILETYPE_PEM) <= 0)
-    {
-        std::cerr << "Failed to load server certificate." << std::endl;
-        // エラーハンドリング
-        // 証明書の読み込みに失敗した場合の処理を記述してください
-    }
-
-    if (SSL_CTX_use_PrivateKey_file(ctx, "server.key", SSL_FILETYPE_PEM) <= 0)
-    {
-        std::cerr << "Failed to load server private key." << std::endl;
-        // エラーハンドリング
-        // 秘密鍵の読み込みに失敗した場合の処理を記述してください
-    }
-}
-
-void ServerController::cleanupSSL()
-{
-    if (ssl)
-    {
-        SSL_free(ssl);
-        ssl = nullptr;
-    }
-
-    if (ctx)
-    {
-        SSL_CTX_free(ctx);
-        ctx = nullptr;
-    }
-
-    EVP_cleanup();
-}
-
-void ServerController::acceptClientConnection()
-{
-    sockaddr_in clientAddr;
-    socklen_t clientAddrLen = sizeof(clientAddr);
-    clientSocket = accept(serverSocket, (struct sockaddr*)&clientAddr, &clientAddrLen);
-    if (clientSocket == -1)
-    {
-        std::cerr << "Failed to accept client connection." << std::endl;
-        // エラーハンドリング
-        // acceptが失敗した場合の処理を記述してください
-    }
-
-    // SSLコンテキストを作成し、ソケットをSSL化
-    ssl = SSL_new(ctx);
-    SSL_set_fd(ssl, clientSocket);
-    if (SSL_accept(ssl) <= 0)
-    {
-        std::cerr << "SSL handshake error." << std::endl;
-        // エラーハンドリング
-        // SSL_acceptが失敗した場合の処理を記述してください
     }
 }
