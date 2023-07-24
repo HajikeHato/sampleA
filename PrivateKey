@@ -70,3 +70,80 @@ int main() {
 
     return 0;
 }
+
+
+
+2つめ
+#include <windows.h>
+#include <wincrypt.h>
+#include <iostream>
+#include <openssl/evp.h>
+#include <openssl/ec.h>
+
+#pragma comment(lib, "crypt32.lib")
+
+int main() {
+    HCERTSTORE hCertStore = NULL;
+    PCCERT_CONTEXT pCertContext = NULL;
+
+    // 鍵の所有者名とアルゴリズムを指定
+    LPCWSTR keyOwner = L"CN=YourCertificateCommonName"; // 証明書の共通名を指定
+
+    // 証明書ストアをオープン
+    hCertStore = CertOpenSystemStore(NULL, L"MY");
+    if (hCertStore == NULL) {
+        std::cerr << "証明書ストアをオープンできませんでした。エラーコード: " << GetLastError() << std::endl;
+        return 1;
+    }
+
+    // 証明書を検索
+    pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_SUBJECT_STR, keyOwner, NULL);
+    if (pCertContext == NULL) {
+        std::cerr << "証明書が見つかりませんでした。エラーコード: " << GetLastError() << std::endl;
+        CertCloseStore(hCertStore, 0);
+        return 1;
+    }
+
+    // 秘密鍵を取得
+    HCRYPTPROV_OR_NCRYPT_KEY_HANDLE hCryptProv = NULL;
+    BOOL bFreeProvider = TRUE;
+    if (!CryptAcquireCertificatePrivateKey(pCertContext, CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG, NULL, &hCryptProv, NULL, NULL)) {
+        std::cerr << "秘密鍵を取得できませんでした。エラーコード: " << GetLastError() << std::endl;
+        CertFreeCertificateContext(pCertContext);
+        CertCloseStore(hCertStore, 0);
+        return 1;
+    }
+
+    // 秘密鍵をEVP_PKEYに変換
+    EVP_PKEY* pkey = EVP_PKEY_new();
+    if (!pkey) {
+        std::cerr << "EVP_PKEYの作成に失敗しました。" << std::endl;
+        CryptReleaseContext(hCryptProv, 0);
+        CertFreeCertificateContext(pCertContext);
+        CertCloseStore(hCertStore, 0);
+        return 1;
+    }
+
+    EVP_PKEY_set_type(pkey, EVP_PKEY_EC);
+    if (!CryptGetUserKey(hCryptProv, AT_SIGNATURE, reinterpret_cast<HCRYPTKEY*>(&pkey->pkey.ec->key)) || !pkey->pkey.ec->key) {
+        std::cerr << "秘密鍵の取得に失敗しました。エラーコード: " << GetLastError() << std::endl;
+        EVP_PKEY_free(pkey);
+        CryptReleaseContext(hCryptProv, 0);
+        CertFreeCertificateContext(pCertContext);
+        CertCloseStore(hCertStore, 0);
+        return 1;
+    }
+
+    // 取得した秘密鍵を確認
+    std::cout << "ECDSA鍵が取得されました。" << std::endl;
+
+    // 秘密鍵を使用した処理を追加
+
+    // 解放
+    EVP_PKEY_free(pkey);
+    CryptReleaseContext(hCryptProv, 0);
+    CertFreeCertificateContext(pCertContext);
+    CertCloseStore(hCertStore, 0);
+
+    return 0;
+}
