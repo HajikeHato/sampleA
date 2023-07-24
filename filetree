@@ -1,0 +1,217 @@
+// TreeViewDemoDlg.h
+#pragma once
+#include "afxcmn.h"
+#include "afxwin.h" // 追加
+
+class CTreeViewDemoDlg : public CDialogEx
+{
+public:
+	CTreeViewDemoDlg(CWnd* pParent = NULL);
+
+#ifdef AFX_DESIGN_TIME
+	enum { IDD = IDD_TREEVIEWDEMO_DIALOG };
+#endif
+
+	protected:
+	virtual void DoDataExchange(CDataExchange* pDX);
+
+protected:
+	HICON m_hIcon;
+
+	virtual BOOL OnInitDialog();
+	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
+	afx_msg void OnPaint();
+	afx_msg HCURSOR OnQueryDragIcon();
+	DECLARE_MESSAGE_MAP()
+
+private:
+	CTreeCtrl m_treeCtrl;
+	CString m_strFolderPath;
+	int m_iMaxDepth;
+	CListBox m_logListBox; // ログ出力用のリストボックスを追加
+
+	void PopulateTree(const CString& folderPath, HTREEITEM hParent, int currentDepth, int maxDepth);
+	void Log(const CString& message); // ログをリストボックスに出力する関数を追加
+
+public:
+	afx_msg void OnBnClickedBrowseButton();
+	afx_msg void OnBnClickedOk();
+	afx_msg void OnEnChangeDepthEdit();
+};
+
+// TreeViewDemoDlg.cpp
+#include "stdafx.h"
+#include "TreeViewDemo.h"
+#include "TreeViewDemoDlg.h"
+#include "afxdialogex.h"
+#include <filesystem>
+
+#ifdef _DEBUG
+#define new DEBUG_NEW
+#endif
+
+CTreeViewDemoDlg::CTreeViewDemoDlg(CWnd* pParent /*=NULL*/)
+	: CDialogEx(IDD_TREEVIEWDEMO_DIALOG, pParent)
+	, m_strFolderPath(_T(""))
+	, m_iMaxDepth(0)
+{
+	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
+}
+
+void CTreeViewDemoDlg::DoDataExchange(CDataExchange* pDX)
+{
+	CDialogEx::DoDataExchange(pDX);
+	DDX_Text(pDX, IDC_FOLDER_EDIT, m_strFolderPath);
+	DDX_Text(pDX, IDC_DEPTH_EDIT, m_iMaxDepth);
+	DDV_MinMaxInt(pDX, m_iMaxDepth, 0, INT_MAX);
+}
+
+BEGIN_MESSAGE_MAP(CTreeViewDemoDlg, CDialogEx)
+	ON_WM_SYSCOMMAND()
+	ON_WM_PAINT()
+	ON_WM_QUERYDRAGICON()
+	ON_BN_CLICKED(IDC_BROWSE_BUTTON, &CTreeViewDemoDlg::OnBnClickedBrowseButton)
+	ON_BN_CLICKED(IDOK, &CTreeViewDemoDlg::OnBnClickedOk)
+	ON_EN_CHANGE(IDC_DEPTH_EDIT, &CTreeViewDemoDlg::OnEnChangeDepthEdit)
+END_MESSAGE_MAP()
+
+BOOL CTreeViewDemoDlg::OnInitDialog()
+{
+	CDialogEx::OnInitDialog();
+
+	SetIcon(m_hIcon, TRUE);
+	SetIcon(m_hIcon, FALSE);
+
+	m_treeCtrl.Attach(GetDlgItem(IDC_TREE)->m_hWnd);
+	m_treeCtrl.ModifyStyle(0, TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT);
+
+	m_logListBox.Attach(GetDlgItem(IDC_LOG_LIST)->m_hWnd); // リストボックスをダイアログのコントロールと関連付ける
+
+	return TRUE;
+}
+
+void CTreeViewDemoDlg::OnSysCommand(UINT nID, LPARAM lParam)
+{
+	if ((nID & 0xFFF0) == SC_CLOSE)
+	{
+		DestroyWindow();
+	}
+	else
+	{
+		CDialogEx::OnSysCommand(nID, lParam);
+	}
+}
+
+void CTreeViewDemoDlg::OnPaint()
+{
+	if (IsIconic())
+	{
+		CPaintDC dc(this);
+		SendMessage(WM_ICONERASEBKGND, reinterpret_cast<WPARAM>(dc.GetSafeHdc()), 0);
+		int cxIcon = GetSystemMetrics(SM_CXICON);
+		int cyIcon = GetSystemMetrics(SM_CYICON);
+		CRect rect;
+		GetClientRect(&rect);
+		int x = (rect.Width() - cxIcon + 1) / 2;
+		int y = (rect.Height() - cyIcon + 1) / 2;
+		dc.DrawIcon(x, y, m_hIcon);
+	}
+	else
+	{
+		CDialogEx::OnPaint();
+	}
+}
+
+HCURSOR CTreeViewDemoDlg::OnQueryDragIcon()
+{
+	return static_cast<HCURSOR>(m_hIcon);
+}
+
+void CTreeViewDemoDlg::OnBnClickedBrowseButton()
+{
+	CFolderPickerDialog dlg;
+	if (dlg.DoModal() == IDOK)
+	{
+		m_strFolderPath = dlg.GetPathName();
+		UpdateData(FALSE);
+	}
+}
+
+void CTreeViewDemoDlg::OnBnClickedOk()
+{
+	UpdateData(TRUE);
+	if (!m_strFolderPath.IsEmpty() && m_iMaxDepth >= 0)
+	{
+		m_treeCtrl.DeleteAllItems();
+		HTREEITEM hRoot = m_treeCtrl.InsertItem(m_strFolderPath);
+		PopulateTree(m_strFolderPath, hRoot, 1, m_iMaxDepth);
+		m_treeCtrl.Expand(hRoot, TVE_EXPAND);
+	}
+}
+
+void CTreeViewDemoDlg::OnEnChangeDepthEdit()
+{
+	UpdateData(TRUE);
+}
+
+void CTreeViewDemoDlg::PopulateTree(const CString& folderPath, HTREEITEM hParent, int currentDepth, int maxDepth)
+{
+	if (currentDepth > maxDepth)
+		return;
+
+	std::filesystem::path path(folderPath);
+	if (!std::filesystem::exists(path) || !std::filesystem::is_directory(path))
+		return;
+
+	std::filesystem::directory_iterator iter(path);
+	std::filesystem::directory_iterator end;
+
+	for (; iter != end; ++iter)
+	{
+		std::filesystem::path currentPath = iter->path();
+		CString fileName = currentPath.filename().c_str();
+
+		if (std::filesystem::is_directory(currentPath))
+		{
+			HTREEITEM hItem = m_treeCtrl.InsertItem(fileName, hParent);
+			PopulateTree(currentPath.wstring().c_str(), hItem, currentDepth + 1, maxDepth);
+		}
+		else
+		{
+			m_treeCtrl.InsertItem(fileName, hParent);
+		}
+	}
+}
+
+void CTreeViewDemoDlg::Log(const CString& message)
+{
+	m_logListBox.AddString(message);
+}
+
+
+
+
+使用例
+void CTreeViewDemoDlg::PopulateTree(const CString& folderPath, HTREEITEM hParent, int currentDepth, int maxDepth)
+{
+    // ...
+
+    for (; iter != end; ++iter)
+    {
+        std::filesystem::path currentPath = iter->path();
+        CString fileName = currentPath.filename().c_str();
+
+        if (std::filesystem::is_directory(currentPath))
+        {
+            HTREEITEM hItem = m_treeCtrl.InsertItem(fileName, hParent);
+            PopulateTree(currentPath.wstring().c_str(), hItem, currentDepth + 1, maxDepth);
+        }
+        else
+        {
+            m_treeCtrl.InsertItem(fileName, hParent);
+            Log(_T("Found file: ") + fileName); // ファイルが見つかったらログに出力
+        }
+    }
+
+    // ...
+}
