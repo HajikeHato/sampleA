@@ -1,0 +1,196 @@
+jsonサンプル
+
+#include <iostream>
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
+
+int main() {
+    json data = R"(
+    [
+      {
+        "name": "John",
+        "age": 30,
+        "isStudent": true
+      },
+      {
+        "name": "Alice",
+        "age": 25,
+        "isStudent": false
+      },
+      {
+        "name": "Bob",
+        "age": 28,
+        "isStudent": true
+      }
+    ]
+    )"_json;
+
+    // JSON配列のすべての要素にアクセスする
+    for (const auto& item : data) {
+        std::cout << "Name: " << item["name"].get<std::string>() << std::endl;
+        std::cout << "Age: " << item["age"].get<int>() << std::endl;
+        std::cout << "Is Student: " << std::boolalpha << item["isStudent"].get<bool>() << std::endl;
+        std::cout << std::endl;
+    }
+
+    return 0;
+}
+
+
+
+
+
+
+
+ラッパークラス
+#include <iostream>
+#include <fstream>
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
+
+class JsonWrapper {
+public:
+    // コンストラクタ
+    JsonWrapper() {}
+
+    // JSONファイルを読み込む
+    bool loadFromFile(const std::string& filename) {
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            std::cerr << "Error: Failed to open JSON file: " << filename << std::endl;
+            return false;
+        }
+
+        try {
+            file >> data_;
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Failed to parse JSON file: " << e.what() << std::endl;
+            file.close();
+            return false;
+        }
+
+        file.close();
+        return true;
+    }
+
+    // JSONをファイルに保存する
+    bool saveToFile(const std::string& filename) {
+        std::ofstream file(filename);
+        if (!file.is_open()) {
+            std::cerr << "Error: Failed to open/create JSON file: " << filename << std::endl;
+            return false;
+        }
+
+        try {
+            file << data_.dump(4); // 4つのスペースで整形して保存
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Failed to serialize JSON: " << e.what() << std::endl;
+            file.close();
+            return false;
+        }
+
+        file.close();
+        return true;
+    }
+
+    // JSONオブジェクトに値を設定する
+    template <typename T>
+    void setValue(const std::string& key, const T& value) {
+        data_[key] = value;
+    }
+
+    // JSONオブジェクトから値を取得する
+    template <typename T>
+    bool getValue(const std::string& key, T& value) const {
+        if (data_.contains(key)) {
+            try {
+                value = data_[key].get<T>();
+                return true;
+            } catch (const std::exception& e) {
+                std::cerr << "Error: Failed to get JSON value: " << e.what() << std::endl;
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    // JSON配列の要素数を取得する
+    size_t getArraySize(const std::string& key) const {
+        if (data_.contains(key) && data_[key].is_array()) {
+            return data_[key].size();
+        }
+
+        return 0;
+    }
+
+    // 指定されたインデックスのJSONオブジェクトを取得する（読み取り専用）
+    const json& getArrayItem(const std::string& key, size_t index) const {
+        static json emptyObject; // 存在しない場合は空のJSONオブジェクトを返す
+        if (data_.contains(key) && data_[key].is_array() && index < data_[key].size()) {
+            return data_[key][index];
+        }
+
+        return emptyObject;
+    }
+
+private:
+    json data_;
+};
+
+
+
+
+
+
+
+ラッパーの使用例
+#include <iostream>
+#include "JsonWrapper.hpp"
+
+int main() {
+    JsonWrapper jsonWrapper;
+
+    // JSONファイルの読み込み
+    if (jsonWrapper.loadFromFile("data.json")) {
+        // 値の設定
+        jsonWrapper.setValue("name", "John");
+        jsonWrapper.setValue("age", 30);
+        jsonWrapper.setValue("isStudent", true);
+
+        // 値の取得
+        std::string name;
+        int age;
+        bool isStudent;
+
+        if (jsonWrapper.getValue("name", name) && jsonWrapper.getValue("age", age) && jsonWrapper.getValue("isStudent", isStudent)) {
+            std::cout << "Name: " << name << std::endl;
+            std::cout << "Age: " << age << std::endl;
+            std::cout << "Is Student: " << std::boolalpha << isStudent << std::endl;
+        }
+
+        // JSON配列にデータを追加
+        json data1 = {
+            {"name", "Michael"},
+            {"age", 35},
+            {"isStudent", false}
+        };
+
+        json data2 = {
+            {"name", "Sarah"},
+            {"age", 29},
+            {"isStudent", true}
+        };
+
+        jsonWrapper.setValue("friends", json::array());
+        jsonWrapper.getArrayItem("friends", 0) = data1;
+        jsonWrapper.getArrayItem("friends", 1) = data2;
+
+        // JSONファイルへの保存
+        jsonWrapper.saveToFile("output.json");
+    }
+
+    return 0;
+}
