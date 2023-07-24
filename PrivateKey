@@ -1,0 +1,72 @@
+#include <windows.h>
+#include <wincrypt.h>
+#include <iostream>
+
+#pragma comment(lib, "crypt32.lib")
+
+int main() {
+    HCERTSTORE hCertStore = NULL;
+    PCCERT_CONTEXT pCertContext = NULL;
+
+    // 鍵の所有者名とアルゴリズムを指定
+    LPCWSTR keyOwner = L"CN=YourCertificateCommonName"; // 証明書の共通名を指定
+    LPCSTR keyAlgorithm = szOID_RSA_RSA; // RSAアルゴリズムを使用
+
+    // 証明書ストアをオープン
+    hCertStore = CertOpenSystemStore(NULL, L"MY");
+    if (hCertStore == NULL) {
+        std::cerr << "証明書ストアをオープンできませんでした。エラーコード: " << GetLastError() << std::endl;
+        return 1;
+    }
+
+    // 証明書を検索
+    pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_SUBJECT_STR, keyOwner, NULL);
+    if (pCertContext == NULL) {
+        std::cerr << "証明書が見つかりませんでした。エラーコード: " << GetLastError() << std::endl;
+        CertCloseStore(hCertStore, 0);
+        return 1;
+    }
+
+    // 秘密鍵を取得
+    HCRYPTPROV_OR_NCRYPT_KEY_HANDLE hCryptProv = NULL;
+    BOOL bFreeProvider = TRUE;
+    if (!CryptAcquireCertificatePrivateKey(pCertContext, CRYPT_ACQUIRE_SILENT_FLAG | CRYPT_ACQUIRE_ONLY_NCRYPT_KEY_FLAG, NULL, &hCryptProv, NULL, NULL)) {
+        std::cerr << "秘密鍵を取得できませんでした。エラーコード: " << GetLastError() << std::endl;
+        CertFreeCertificateContext(pCertContext);
+        CertCloseStore(hCertStore, 0);
+        return 1;
+    }
+
+    // 秘密鍵の情報を取得
+    DWORD keySpec;
+    DWORD keySize;
+    BOOL bCallerFreeProv;
+    if (!CryptGetProvParam(hCryptProv, PP_KEYSPEC, reinterpret_cast<BYTE*>(&keySpec), &(sizeof(keySpec)), 0)) {
+        std::cerr << "秘密鍵の情報を取得できませんでした。エラーコード: " << GetLastError() << std::endl;
+        CryptReleaseContext(hCryptProv, 0);
+        CertFreeCertificateContext(pCertContext);
+        CertCloseStore(hCertStore, 0);
+        return 1;
+    }
+
+    if (!CryptGetKeyParam(hCryptProv, KP_KEYLEN, reinterpret_cast<BYTE*>(&keySize), &(sizeof(keySize)), 0)) {
+        std::cerr << "秘密鍵の情報を取得できませんでした。エラーコード: " << GetLastError() << std::endl;
+        CryptReleaseContext(hCryptProv, 0);
+        CertFreeCertificateContext(pCertContext);
+        CertCloseStore(hCertStore, 0);
+        return 1;
+    }
+
+    // 取得した情報を表示
+    std::cout << "証明書が見つかりました。" << std::endl;
+    std::cout << "鍵の所有者名: " << keyOwner << std::endl;
+    std::cout << "秘密鍵のアルゴリズム: " << keyAlgorithm << std::endl;
+    std::cout << "秘密鍵のサイズ: " << keySize << " bits" << std::endl;
+
+    // 解放
+    CryptReleaseContext(hCryptProv, 0);
+    CertFreeCertificateContext(pCertContext);
+    CertCloseStore(hCertStore, 0);
+
+    return 0;
+}
