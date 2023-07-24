@@ -1,0 +1,45 @@
+
+void sendFile(SSL* ssl, const char* filepath) {
+    std::ifstream file(filepath, std::ios::binary);
+    if (!file) {
+        throw std::runtime_error("Error opening file.");
+    }
+
+    char buffer[1024];
+    int bytes_read;
+
+    while (!file.eof()) {
+        file.read(buffer, sizeof(buffer));
+        bytes_read = static_cast<int>(file.gcount());
+
+        if (SSL_write(ssl, buffer, bytes_read) <= 0) {
+            ERR_print_errors_fp(stderr);
+            throw std::runtime_error("Error sending file data.");
+        }
+    }
+
+    file.close();
+}
+
+
+
+バイナリをstringに連結
+
+
+int main() {
+    // 例としてASCIIコード以外のデータを格納するバッファを用意します
+    unsigned char binaryData[] = {
+        0x48, 0x65, 0x6C, 0x6C, 0x6F, // "Hello"のASCIIコード
+        0xC2, 0xA9,                     // © (コピーライト記号)のUTF-8コード
+        0xE6, 0x97, 0xA5                // 日 (日本語の漢字)のUTF-8コード
+    };
+
+    // バイナリデータをstd::stringに直接連結します
+    std::string strData = "This is a string.";
+    strData.append(reinterpret_cast<const char*>(binaryData), sizeof(binaryData));
+
+    // 結果を表示します
+    std::cout << "Concatenated String: " << strData << std::endl;
+
+    return 0;
+}
