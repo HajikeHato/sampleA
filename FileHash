@@ -98,3 +98,140 @@ SSL_CTX* createSSLContext() {
 void cleanupOpenSSL() {
     EVP_cleanup();
 }
+
+
+
+受信側
+
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <Winsock2.h>
+
+#pragma comment(lib, "ws2_32.lib")
+
+// 関数のプロトタイプ宣言
+std::string calculateHash(const std::string& content);
+
+int main() {
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        std::cerr << "Failed to initialize winsock" << std::endl;
+        return 1;
+    }
+
+    // ソケットの作成
+    SOCKET listenSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (listenSocket == INVALID_SOCKET) {
+        std::cerr << "Socket creation failed" << std::endl;
+        WSACleanup();
+        return 1;
+    }
+
+    // バインド
+    sockaddr_in serverAddr;
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
+    serverAddr.sin_port = htons(443);
+
+    if (bind(listenSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
+        std::cerr << "Bind failed" << std::endl;
+        closesocket(listenSocket);
+        WSACleanup();
+        return 1;
+    }
+
+    // リッスン
+    if (listen(listenSocket, SOMAXCONN) == SOCKET_ERROR) {
+        std::cerr << "Listen failed" << std::endl;
+        closesocket(listenSocket);
+        WSACleanup();
+        return 1;
+    }
+
+    // クライアントからの接続を待機
+    SOCKET clientSocket = accept(listenSocket, NULL, NULL);
+    if (clientSocket == INVALID_SOCKET) {
+        std::cerr << "Accept failed" << std::endl;
+        closesocket(listenSocket);
+        WSACleanup();
+        return 1;
+    }
+
+    // データを受信
+    const int bufferSize = 1024;
+    char buffer[bufferSize];
+    int bytesReceived = recv(clientSocket, buffer, bufferSize, 0);
+    if (bytesReceived == SOCKET_ERROR) {
+        std::cerr << "Receive failed" << std::endl;
+        closesocket(clientSocket);
+        closesocket(listenSocket);
+        WSACleanup();
+        return 1;
+    }
+
+    // 受信したデータを文字列に変換
+    std::string receivedData(buffer, bytesReceived);
+
+    // 受信データを分解してファイル名、ファイル内容、およびハッシュを取得
+    size_t firstNewLine = receivedData.find('\n');
+    if (firstNewLine == std::string::npos) {
+        std::cerr << "Invalid data format" << std::endl;
+        closesocket(clientSocket);
+        closesocket(listenSocket);
+        WSACleanup();
+        return 1;
+    }
+
+    std::string filename = receivedData.substr(0, firstNewLine);
+
+    size_t secondNewLine = receivedData.find('\n', firstNewLine + 1);
+    if (secondNewLine == std::string::npos) {
+        std::cerr << "Invalid data format" << std::endl;
+        closesocket(clientSocket);
+        closesocket(listenSocket);
+        WSACleanup();
+        return 1;
+    }
+
+    std::string content = receivedData.substr(firstNewLine + 1, secondNewLine - firstNewLine - 1);
+    std::string receivedHash = receivedData.substr(secondNewLine + 1);
+
+    // 受信したファイル内容をハッシュ化して整合性を確認
+    std::string calculatedHash = calculateHash(content);
+    if (receivedHash != calculatedHash) {
+        std::cerr << "File integrity check failed" << std::endl;
+        closesocket(clientSocket);
+        closesocket(listenSocket);
+        WSACleanup();
+        return 1;
+    }
+
+    // ファイルを作成して内容を書き込む
+    std::ofstream outputFile(filename);
+    if (!outputFile) {
+        std::cerr << "Error creating file: " << filename << std::endl;
+        closesocket(clientSocket);
+        closesocket(listenSocket);
+        WSACleanup();
+        return 1;
+    }
+
+    outputFile << content;
+    outputFile.close();
+
+    // クライアントとの接続を閉じる
+    closesocket(clientSocket);
+    closesocket(listenSocket);
+
+    // Winsockのクリーンアップ
+    WSACleanup();
+
+    return 0;
+}
+
+std::string calculateHash(const std::string& content) {
+    // ファイル内容のハッシュを計算する方法は任意です
+    // 例としてSHA256を使用しますが、実際には必要に応じて変更してください
+    // (calculateHash関数は前のコードに含まれていた関数をそのまま使用しています)
+}
