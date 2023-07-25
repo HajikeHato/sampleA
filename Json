@@ -1,49 +1,10 @@
 jsonサンプル
 
-#include <iostream>
-#include <nlohmann/json.hpp>
 
-using json = nlohmann::json;
+ヘッダ
 
-int main() {
-    json data = R"(
-    [
-      {
-        "name": "John",
-        "age": 30,
-        "isStudent": true
-      },
-      {
-        "name": "Alice",
-        "age": 25,
-        "isStudent": false
-      },
-      {
-        "name": "Bob",
-        "age": 28,
-        "isStudent": true
-      }
-    ]
-    )"_json;
+#pragma once
 
-    // JSON配列のすべての要素にアクセスする
-    for (const auto& item : data) {
-        std::cout << "Name: " << item["name"].get<std::string>() << std::endl;
-        std::cout << "Age: " << item["age"].get<int>() << std::endl;
-        std::cout << "Is Student: " << std::boolalpha << item["isStudent"].get<bool>() << std::endl;
-        std::cout << std::endl;
-    }
-
-    return 0;
-}
-
-
-
-
-
-
-
-ラッパークラス
 #include <iostream>
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -52,89 +13,33 @@ using json = nlohmann::json;
 
 class JsonWrapper {
 public:
-    // コンストラクタ
-    JsonWrapper() {}
+    JsonWrapper();
 
-    // JSONファイルを読み込む
-    bool loadFromFile(const std::string& filename) {
-        std::ifstream file(filename);
-        if (!file.is_open()) {
-            std::cerr << "Error: Failed to open JSON file: " << filename << std::endl;
-            return false;
-        }
+    bool loadFromFile(const std::string& filename);
+    bool saveToFile(const std::string& filename);
 
-        try {
-            file >> data_;
-        } catch (const std::exception& e) {
-            std::cerr << "Error: Failed to parse JSON file: " << e.what() << std::endl;
-            file.close();
-            return false;
-        }
-
-        file.close();
-        return true;
-    }
-
-    // JSONをファイルに保存する
-    bool saveToFile(const std::string& filename) {
-        std::ofstream file(filename);
-        if (!file.is_open()) {
-            std::cerr << "Error: Failed to open/create JSON file: " << filename << std::endl;
-            return false;
-        }
-
-        try {
-            file << data_.dump(4); // 4つのスペースで整形して保存
-        } catch (const std::exception& e) {
-            std::cerr << "Error: Failed to serialize JSON: " << e.what() << std::endl;
-            file.close();
-            return false;
-        }
-
-        file.close();
-        return true;
-    }
-
-    // JSONオブジェクトに値を設定する
     template <typename T>
-    void setValue(const std::string& key, const T& value) {
-        data_[key] = value;
-    }
+    void setValue(const std::string& key, const T& value);
 
-    // JSONオブジェクトから値を取得する
     template <typename T>
-    bool getValue(const std::string& key, T& value) const {
-        if (data_.contains(key)) {
-            try {
-                value = data_[key].get<T>();
-                return true;
-            } catch (const std::exception& e) {
-                std::cerr << "Error: Failed to get JSON value: " << e.what() << std::endl;
-                return false;
-            }
-        }
+    bool getValue(const std::string& key, T& value) const;
 
-        return false;
-    }
+    size_t getArraySize(const std::string& key) const;
+    const json& getArrayItem(const std::string& key, size_t index) const;
 
-    // JSON配列の要素数を取得する
-    size_t getArraySize(const std::string& key) const {
-        if (data_.contains(key) && data_[key].is_array()) {
-            return data_[key].size();
-        }
+    template <typename T>
+    void appendToArray(const std::string& key, const T& value);
 
-        return 0;
-    }
+    template <typename T>
+    int findIndexOfValue(const std::string& key, const T& value) const;
 
-    // 指定されたインデックスのJSONオブジェクトを取得する（読み取り専用）
-    const json& getArrayItem(const std::string& key, size_t index) const {
-        static json emptyObject; // 存在しない場合は空のJSONオブジェクトを返す
-        if (data_.contains(key) && data_[key].is_array() && index < data_[key].size()) {
-            return data_[key][index];
-        }
-
-        return emptyObject;
-    }
+    bool hasKey(const std::string& key) const;
+    bool removeKey(const std::string& key);
+    void clearArray(const std::string& key);
+    bool renameKey(const std::string& oldKey, const std::string& newKey);
+    void merge(const json& otherJson);
+    bool isEmpty() const;
+    void clear();
 
 private:
     json data_;
@@ -142,6 +47,141 @@ private:
 
 
 
+ソース
+#include "JsonWrapper.hpp"
+
+JsonWrapper::JsonWrapper() {}
+
+bool JsonWrapper::loadFromFile(const std::string& filename) {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Error: Failed to open JSON file: " << filename << std::endl;
+        return false;
+    }
+
+    try {
+        file >> data_;
+    } catch (const std::exception& e) {
+        std::cerr << "Error: Failed to parse JSON file: " << e.what() << std::endl;
+        file.close();
+        return false;
+    }
+
+    file.close();
+    return true;
+}
+
+bool JsonWrapper::saveToFile(const std::string& filename) {
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Error: Failed to open/create JSON file: " << filename << std::endl;
+        return false;
+    }
+
+    try {
+        file << data_.dump(4); // 4つのスペースで整形して保存
+    } catch (const std::exception& e) {
+        std::cerr << "Error: Failed to serialize JSON: " << e.what() << std::endl;
+        file.close();
+        return false;
+    }
+
+    file.close();
+    return true;
+}
+
+size_t JsonWrapper::getArraySize(const std::string& key) const {
+    if (data_.contains(key) && data_[key].is_array()) {
+        return data_[key].size();
+    }
+    return 0;
+}
+
+const json& JsonWrapper::getArrayItem(const std::string& key, size_t index) const {
+    static json emptyObject;
+    if (data_.contains(key) && data_[key].is_array() && index < data_[key].size()) {
+        return data_[key][index];
+    }
+    return emptyObject;
+}
+
+template <typename T>
+void JsonWrapper::setValue(const std::string& key, const T& value) {
+    data_[key] = value;
+}
+
+template <typename T>
+bool JsonWrapper::getValue(const std::string& key, T& value) const {
+    if (data_.contains(key)) {
+        try {
+            value = data_[key].get<T>();
+            return true;
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Failed to get JSON value: " << e.what() << std::endl;
+        }
+    }
+    return false;
+}
+
+template <typename T>
+void JsonWrapper::appendToArray(const std::string& key, const T& value) {
+    if (data_.contains(key) && data_[key].is_array()) {
+        data_[key].push_back(value);
+    }
+}
+
+template <typename T>
+int JsonWrapper::findIndexOfValue(const std::string& key, const T& value) const {
+    if (data_.contains(key) && data_[key].is_array()) {
+        int index = 0;
+        for (const auto& item : data_[key]) {
+            if (item == value) {
+                return index;
+            }
+            index++;
+        }
+    }
+    return -1;
+}
+
+bool JsonWrapper::hasKey(const std::string& key) const {
+    return data_.contains(key);
+}
+
+bool JsonWrapper::removeKey(const std::string& key) {
+    if (data_.contains(key)) {
+        data_.erase(key);
+        return true;
+    }
+    return false;
+}
+
+void JsonWrapper::clearArray(const std::string& key) {
+    if (data_.contains(key) && data_[key].is_array()) {
+        data_[key].clear();
+    }
+}
+
+bool JsonWrapper::renameKey(const std::string& oldKey, const std::string& newKey) {
+    if (data_.contains(oldKey) && !data_.contains(newKey)) {
+        data_[newKey] = data_[oldKey];
+        data_.erase(oldKey);
+        return true;
+    }
+    return false;
+}
+
+void JsonWrapper::merge(const json& otherJson) {
+    data_.merge_patch(otherJson);
+}
+
+bool JsonWrapper::isEmpty() const {
+    return data_.empty();
+}
+
+void JsonWrapper::clear() {
+    data_.clear();
+}
 
 
 
@@ -185,10 +225,36 @@ int main() {
         };
 
         jsonWrapper.setValue("friends", json::array());
-        jsonWrapper.getArrayItem("friends", 0) = data1;
-        jsonWrapper.getArrayItem("friends", 1) = data2;
+        jsonWrapper.appendToArray("friends", data1);
+        jsonWrapper.appendToArray("friends", data2);
 
-        // JSONファイルへの保存
+        // JSONキーの存在確認と削除
+        if (jsonWrapper.hasKey("address")) {
+            jsonWrapper.removeKey("address");
+        }
+
+        // JSON配列のクリア
+        jsonWrapper.clearArray("friends");
+
+        // JSONキーのリネーム
+        jsonWrapper.renameKey("isStudent", "isEnrolled");
+
+        // 別のJSONオブジェクトをマージ
+        json otherData = {
+            {"hobbies", {"reading", "swimming"}},
+            {"location", "New York"}
+        };
+
+        jsonWrapper.merge(otherData);
+
+        // JSONの空判定
+        if (jsonWrapper.isEmpty()) {
+            std::cout << "JSON is empty." << std::endl;
+        } else {
+            std::cout << "JSON is not empty." << std::endl;
+        }
+
+        // JSONデータをファイルに保存
         jsonWrapper.saveToFile("output.json");
     }
 
