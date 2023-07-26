@@ -1,3 +1,29 @@
+保存するときこうすればよい？
+bool JsonWrapper::saveToFile(const std::string& filename) {
+    std::ofstream file(filename, std::ios::out | std::ios::binary); // フラグを追加
+
+    if (!file.is_open()) {
+        std::cerr << "Error: Failed to open/create JSON file: " << filename << std::endl;
+        return false;
+    }
+
+    try {
+        file << data_.dump(4); // 4つのスペースで整形して保存
+    } catch (const std::exception& e) {
+        std::cerr << "Error: Failed to serialize JSON: " << e.what() << std::endl;
+        file.close();
+        return false;
+    }
+
+    file.close();
+    return true;
+}
+
+
+
+
+
+
 jsonサンプル
 
 
