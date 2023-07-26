@@ -1,0 +1,110 @@
+#include <iostream>
+#include <windows.h>
+#include <wincrypt.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+#include <openssl/evp.h>
+
+#pragma comment(lib, "crypt32.lib")
+
+void ExportCertificateWithPrivateKey(const std::wstring& certificateName, const std::wstring& password) {
+    HCERTSTORE hCertStore = nullptr;
+    PCCERT_CONTEXT pCertContext = nullptr;
+
+    // Open the certificate store.
+    hCertStore = CertOpenSystemStore(NULL, L"MY");
+    if (!hCertStore) {
+        std::cout << "Failed to open the certificate store." << std::endl;
+        return;
+    }
+
+    // Find the certificate by its friendly name.
+    pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_SUBJECT_STR, certificateName.c_str(), nullptr);
+    if (!pCertContext) {
+        std::cout << "Certificate not found." << std::endl;
+        CertCloseStore(hCertStore, 0);
+        return;
+    }
+
+    // Prepare the PFX export parameters.
+    CRYPT_DATA_BLOB pfxBlob;
+    ZeroMemory(&pfxBlob, sizeof(CRYPT_DATA_BLOB));
+
+    CRYPT_EXPORT_PARAMS exportParams;
+    ZeroMemory(&exportParams, sizeof(CRYPT_EXPORT_PARAMS));
+    exportParams.dwExportFlags = CRYPT_EXPORTABLE;
+    exportParams.dwKeySpec = AT_KEYEXCHANGE; // Use AT_KEYEXCHANGE for RSA keys
+
+    // Set the password for the exported PFX.
+    exportParams.pszPrivateKeyExportAlgId = szOID_RSA_RC4;
+
+    HCRYPTPROV_LEGACY hCryptProv = NULL;
+
+    if (CryptAcquireCertificatePrivateKey(pCertContext, 0, NULL, &hCryptProv, &exportParams.dwKeySpec, &exportParams.pvExportAuxInfo)) {
+        exportParams.cSecretStuff = wcslen(password.c_str()) + 1;
+        exportParams.pwszSecretStuff = password.c_str();
+
+        // Export the certificate and private key to a PFX blob.
+        if (CryptExportPKCS8Ex(hCryptProv, exportParams.dwKeySpec, NULL, NULL, 0, NULL, &pfxBlob)) {
+            // Convert the PFX blob to OpenSSL structures (X509 and EVP_PKEY).
+            BIO* bio = BIO_new_mem_buf(pfxBlob.pbData, pfxBlob.cbData);
+            PKCS12* p12 = d2i_PKCS12_bio(bio, NULL);
+
+            // Get the X509 certificate and EVP_PKEY from the PKCS12 structure.
+            X509* x509Cert = nullptr;
+            EVP_PKEY* evpPkey = nullptr;
+            PKCS12_parse(p12, password.c_str(), &evpPkey, &x509Cert, nullptr);
+
+            // Now you have the X509 certificate and EVP_PKEY in the "x509Cert" and "evpPkey" variables, respectively.
+
+            // Do something with the X509 certificate and EVP_PKEY (e.g., use them in your OpenSSL-based code).
+
+            // Clean up OpenSSL resources.
+            X509_free(x509Cert);
+            EVP_PKEY_free(evpPkey);
+            PKCS12_free(p12);
+            BIO_free(bio);
+
+            // Clean up resources.
+            if (hCryptProv) {
+                CryptReleaseContext(hCryptProv, 0);
+            }
+            if (exportParams.pvExportAuxInfo) {
+                LocalFree(exportParams.pvExportAuxInfo);
+            }
+            CertFreeCertificateContext(pCertContext);
+            CertCloseStore(hCertStore, 0);
+
+            // Remember to free the memory when done:
+            LocalFree(pfxBlob.pbData);
+
+            std::cout << "Certificate exported successfully." << std::endl;
+            return;
+        }
+        else {
+            std::cout << "Failed to export the certificate and private key to a PFX blob." << std::endl;
+        }
+    }
+    else {
+        std::cout << "Failed to acquire the private key." << std::endl;
+    }
+
+    // Clean up resources in case of failure.
+    if (hCryptProv) {
+        CryptReleaseContext(hCryptProv, 0);
+    }
+    if (exportParams.pvExportAuxInfo) {
+        LocalFree(exportParams.pvExportAuxInfo);
+    }
+    CertFreeCertificateContext(pCertContext);
+    CertCloseStore(hCertStore, 0);
+}
+
+int main() {
+    std::wstring certificateName = L"YourCertificateFriendlyName"; // Replace this with the desired certificate's friendly name
+    std::wstring password = L"YourPFXPassword"; // Replace this with the desired PFX password
+
+    ExportCertificateWithPrivateKey(certificateName, password);
+
+    return 0;
+}
