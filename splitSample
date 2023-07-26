@@ -1,0 +1,13 @@
+std::vector<std::string_view> splitString(const std::string_view& input, char delimiter) {
+    std::vector<std::string_view> result;
+    size_t start = 0;
+    size_t end = input.find(delimiter);
+    while (end != std::string_view::npos) {
+        result.push_back(input.substr(start, end - start));
+        start = end + 1;
+        end = input.find(delimiter, start);
+    }
+    result.push_back(input.substr(start));
+
+    return result;
+}
