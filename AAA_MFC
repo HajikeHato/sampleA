@@ -1,0 +1,183 @@
+ヘッダ
+#pragma once
+#include "OpenSSLWrapper.h"
+#include <vector>
+
+class CMyServerDlg : public CDialogEx {
+public:
+    CMyServerDlg(CWnd* pParent = nullptr);
+
+#ifdef AFX_DESIGN_TIME
+    enum { IDD = IDD_MY_SERVER_DIALOG };
+#endif
+
+protected:
+    virtual void DoDataExchange(CDataExchange* pDX);
+
+protected:
+    HICON m_hIcon;
+    BOOL m_bServerRunning;
+    OpenSSLWrapper m_sslWrapper;
+    SOCKET m_serverSocket;
+    std::vector<SOCKET> m_clientSockets;
+
+    static UINT ServerThreadFunc(LPVOID pParam);
+
+    virtual BOOL OnInitDialog();
+    afx_msg void OnPaint();
+    afx_msg HCURSOR OnQueryDragIcon();
+    DECLARE_MESSAGE_MAP()
+public:
+    afx_msg void OnBnClickedStartServerButton();
+    afx_msg void OnBnClickedStopServerButton();
+    afx_msg void OnDestroy();
+};
+
+
+ソース
+#include "stdafx.h"
+#include "MyServerDlg.h"
+
+#ifdef _DEBUG
+#define new DEBUG_NEW
+#endif
+
+CMyServerDlg::CMyServerDlg(CWnd* pParent /*=nullptr*/)
+    : CDialogEx(IDD_MY_SERVER_DIALOG, pParent), m_bServerRunning(FALSE), m_serverSocket(INVALID_SOCKET) {
+    m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
+}
+
+void CMyServerDlg::DoDataExchange(CDataExchange* pDX) {
+    CDialogEx::DoDataExchange(pDX);
+}
+
+BEGIN_MESSAGE_MAP(CMyServerDlg, CDialogEx)
+    ON_WM_PAINT()
+    ON_WM_QUERYDRAGICON()
+    ON_BN_CLICKED(IDC_START_SERVER_BUTTON, &CMyServerDlg::OnBnClickedStartServerButton)
+    ON_BN_CLICKED(IDC_STOP_SERVER_BUTTON, &CMyServerDlg::OnBnClickedStopServerButton)
+    ON_WM_DESTROY()
+END_MESSAGE_MAP()
+
+BOOL CMyServerDlg::OnInitDialog() {
+    CDialogEx::OnInitDialog();
+    SetIcon(m_hIcon, TRUE);
+    SetIcon(m_hIcon, FALSE);
+    return TRUE;
+}
+
+void CMyServerDlg::OnPaint() {
+    if (IsIconic()) {
+        CPaintDC dc(this);
+        SendMessage(WM_ICONERASEBKGND, reinterpret_cast<WPARAM>(dc.GetSafeHdc()), 0);
+        int cxIcon = GetSystemMetrics(SM_CXICON);
+        int cyIcon = GetSystemMetrics(SM_CYICON);
+        CRect rect;
+        GetClientRect(&rect);
+        int x = (rect.Width() - cxIcon + 1) / 2;
+        int y = (rect.Height() - cyIcon + 1) / 2;
+        dc.DrawIcon(x, y, m_hIcon);
+    }
+    else {
+        CDialogEx::OnPaint();
+    }
+}
+
+HCURSOR CMyServerDlg::OnQueryDragIcon() {
+    return static_cast<HCURSOR>(m_hIcon);
+}
+
+UINT CMyServerDlg::ServerThreadFunc(LPVOID pParam) {
+    CMyServerDlg* pDlg = reinterpret_cast<CMyServerDlg*>(pParam);
+
+    // サーバーソケットの作成とバインド
+    pDlg->m_serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (pDlg->m_serverSocket == INVALID_SOCKET) {
+        AfxMessageBox(_T("Failed to create socket."));
+        return 0;
+    }
+
+    sockaddr_in serverAddr;
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(443); // 任意のポート番号を指定
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
+
+    if (bind(pDlg->m_serverSocket, (sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
+        AfxMessageBox(_T("Failed to bind socket."));
+        closesocket(pDlg->m_serverSocket);
+        return 0;
+    }
+
+    // サーバーソケットのリッスン開始
+    if (listen(pDlg->m_serverSocket, SOMAXCONN) == SOCKET_ERROR) {
+        AfxMessageBox(_T("Failed to listen on the socket."));
+        closesocket(pDlg->m_serverSocket);
+        return 0;
+    }
+
+    pDlg->m_bServerRunning = TRUE;
+
+    while (pDlg->m_bServerRunning) {
+        // クライアント接続を受け入れる
+        sockaddr_in clientAddr;
+        int clientAddrLen = sizeof(clientAddr);
+        SOCKET clientSocket = accept(pDlg->m_serverSocket, (sockaddr*)&clientAddr, &clientAddrLen);
+        if (clientSocket == INVALID_SOCKET) {
+            AfxMessageBox(_T("Failed to accept client connection."));
+            continue;
+        }
+
+        // SSL通信の初期化
+        pDlg->m_sslWrapper.initializeServer("server.crt", "server.key"); // サーバー証明書と秘密鍵のファイルパスを指定
+
+        // SSL接続の確立
+        if (!pDlg->m_sslWrapper.connect(clientSocket)) {
+            AfxMessageBox(_T("Failed to establish SSL connection."));
+            closesocket(clientSocket);
+            continue;
+        }
+
+        // データの受信
+        char buffer[1024];
+        int receivedBytes = pDlg->m_sslWrapper.receive(buffer, sizeof(buffer));
+        if (receivedBytes > 0) {
+            // データの処理（ここでは単純に受信したデータをエコーバック）
+            pDlg->m_sslWrapper.send(buffer, receivedBytes);
+        }
+
+        // SSL通信の終了
+        pDlg->m_sslWrapper.disconnect();
+
+        // クライアントソケットを閉じる
+        closesocket(clientSocket);
+    }
+
+    // サーバーソケットを閉じる
+    if (pDlg->m_serverSocket != INVALID_SOCKET) {
+        closesocket(pDlg->m_serverSocket);
+        pDlg->m_serverSocket = INVALID_SOCKET;
+    }
+
+    return 0;
+}
+
+void CMyServerDlg::OnBnClickedStartServerButton() {
+    if (m_bServerRunning) {
+        AfxMessageBox(_T("The server is already running."));
+        return;
+    }
+
+    m_bServerRunning = TRUE;
+
+    AfxBeginThread(ServerThreadFunc, this);
+}
+
+void CMyServerDlg::OnBnClickedStopServerButton() {
+    m_bServerRunning = FALSE;
+}
+
+void CMyServerDlg::OnDestroy() {
+    OnBnClickedStopServerButton(); // アプリケーション終了時にサーバーを停止する
+
+    CDialogEx::OnDestroy();
+}
