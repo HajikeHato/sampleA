@@ -1,49 +1,57 @@
-#include "json_wrapper.h"
 #include <iostream>
-#include <unordered_map>
+#include "json_wrapper.h"
 
 int main() {
-    // JSONファイルの読み込みと値の取得
+    // JSONファイルを読み込む
     JsonWrapper jsonWrapper;
-    if (jsonWrapper.loadFromFile("data.json")) {
-        std::string name = jsonWrapper.getValue<std::string>("name");
-        int age = jsonWrapper.getValue<int>("age");
-        bool isStudent = jsonWrapper.getValue<bool>("is_student", false);
-
-        std::cout << "Name: " << name << std::endl;
-        std::cout << "Age: " << age << std::endl;
-        std::cout << "Is Student: " << std::boolalpha << isStudent << std::endl;
-    } else {
-        std::cout << "Failed to load JSON file." << std::endl;
+    if (!jsonWrapper.loadFromFile("example.json")) {
+        std::cerr << "Failed to load JSON file." << std::endl;
+        return 1;
     }
 
-    // 新しい値の追加
-    jsonWrapper.addValue("city", "New York");
-    jsonWrapper.addValue("is_student", true);
+    // 値の追加
+    jsonWrapper.addValue("name", "John Doe");
+    jsonWrapper.addValue("age", 30);
+    jsonWrapper.addValue("is_student", false);
 
     // 配列の追加
-    std::vector<std::string> hobbies = { "Reading", "Playing Soccer", "Cooking" };
-    jsonWrapper.addArray("hobbies", hobbies);
+    std::vector<int> numbers = {1, 2, 3, 4, 5};
+    jsonWrapper.addArray("numbers", numbers);
 
-    // Objectの配列の追加
-    std::vector<std::unordered_map<std::string, std::string>> friends = {
-        { { "name", "Alice" }, { "age", "25" }, { "city", "London" } },
-        { { "name", "Bob" }, { "age", "30" }, { "city", "Tokyo" } }
+    // オブジェクトの配列の追加
+    std::vector<std::unordered_map<std::string, std::string>> persons = {
+        {{"name", "Alice"}, {"age", "25"}},
+        {{"name", "Bob"}, {"age", "28"}}
     };
-    jsonWrapper.addObjectArray("friends", friends);
+    jsonWrapper.addObjectArray("persons", persons);
 
-    // JSONファイルの書き込み
-    jsonWrapper.saveToFile("output.json");
+    // 値の取得
+    std::string name = jsonWrapper.getValue<std::string>("name");
+    int age = jsonWrapper.getValue<int>("age");
+    bool isStudent = jsonWrapper.getValue<bool>("is_student");
+    std::vector<int> retrievedNumbers = jsonWrapper.getArray<int>("numbers");
+    std::vector<std::unordered_map<std::string, std::string>> retrievedPersons = jsonWrapper.getObjectArray("persons");
 
-    // 条件に一致するObjectの取得
-    std::vector<std::unordered_map<std::string, std::string>> matchedFriends = jsonWrapper.getObjectArrayByCondition("friends", "city", "Tokyo");
-    if (!matchedFriends.empty()) {
-        std::cout << "Friends in Tokyo:" << std::endl;
-        for (const auto& friendInfo : matchedFriends) {
-            std::cout << "Name: " << friendInfo["name"] << ", Age: " << friendInfo["age"] << std::endl;
-        }
-    } else {
-        std::cout << "No friends found in Tokyo." << std::endl;
+    // 取得した値を表示
+    std::cout << "Name: " << name << std::endl;
+    std::cout << "Age: " << age << std::endl;
+    std::cout << "Is Student: " << std::boolalpha << isStudent << std::endl;
+
+    std::cout << "Numbers: ";
+    for (int num : retrievedNumbers) {
+        std::cout << num << " ";
+    }
+    std::cout << std::endl;
+
+    std::cout << "Persons:" << std::endl;
+    for (const auto& person : retrievedPersons) {
+        std::cout << "  Name: " << person.at("name") << ", Age: " << person.at("age") << std::endl;
+    }
+
+    // JSONファイルに保存
+    if (!jsonWrapper.saveToFile("example_updated.json")) {
+        std::cerr << "Failed to save JSON file." << std::endl;
+        return 1;
     }
 
     return 0;
