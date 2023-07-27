@@ -1,0 +1,125 @@
+ヘッダ
+#pragma once
+
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <string>
+
+class OpenSSLWrapper {
+public:
+    OpenSSLWrapper();
+    ~OpenSSLWrapper();
+
+    bool initializeServer(const std::string& certificatePath, const std::string& privateKeyPath);
+    bool initializeClient();
+    bool connect(int sockfd);
+    bool send(const void* data, size_t size);
+    bool receive(void* buffer, size_t size);
+    void disconnect();
+
+private:
+    SSL_CTX* ctx_ = nullptr;
+    SSL* ssl_ = nullptr;
+
+    void handleOpenSSLError();
+};
+
+
+
+ソース
+#include "OpenSSLWrapper.h"
+
+OpenSSLWrapper::OpenSSLWrapper() {
+    SSL_library_init();
+    SSL_load_error_strings();
+    OpenSSL_add_all_algorithms();
+}
+
+OpenSSLWrapper::~OpenSSLWrapper() {
+    EVP_cleanup();
+}
+
+bool OpenSSLWrapper::initializeServer(const std::string& certificatePath, const std::string& privateKeyPath) {
+    ctx_ = SSL_CTX_new(SSLv23_server_method());
+    if (!ctx_) {
+        handleOpenSSLError();
+        return false;
+    }
+
+    if (SSL_CTX_use_certificate_file(ctx_, certificatePath.c_str(), SSL_FILETYPE_PEM) <= 0) {
+        handleOpenSSLError();
+        return false;
+    }
+
+    if (SSL_CTX_use_PrivateKey_file(ctx_, privateKeyPath.c_str(), SSL_FILETYPE_PEM) <= 0) {
+        handleOpenSSLError();
+        return false;
+    }
+
+    return true;
+}
+
+bool OpenSSLWrapper::initializeClient() {
+    ctx_ = SSL_CTX_new(SSLv23_client_method());
+    if (!ctx_) {
+        handleOpenSSLError();
+        return false;
+    }
+
+    return true;
+}
+
+bool OpenSSLWrapper::connect(int sockfd) {
+    ssl_ = SSL_new(ctx_);
+    if (!ssl_) {
+        handleOpenSSLError();
+        return false;
+    }
+
+    if (SSL_set_fd(ssl_, sockfd) != 1) {
+        handleOpenSSLError();
+        return false;
+    }
+
+    if (SSL_connect(ssl_) <= 0) {
+        handleOpenSSLError();
+        return false;
+    }
+
+    return true;
+}
+
+bool OpenSSLWrapper::send(const void* data, size_t size) {
+    int sentBytes = SSL_write(ssl_, data, size);
+    if (sentBytes <= 0) {
+        handleOpenSSLError();
+        return false;
+    }
+
+    return true;
+}
+
+bool OpenSSLWrapper::receive(void* buffer, size_t size) {
+    int receivedBytes = SSL_read(ssl_, buffer, size);
+    if (receivedBytes <= 0) {
+        handleOpenSSLError();
+        return false;
+    }
+
+    return true;
+}
+
+void OpenSSLWrapper::disconnect() {
+    if (ssl_) {
+        SSL_shutdown(ssl_);
+        SSL_free(ssl_);
+        ssl_ = nullptr;
+    }
+}
+
+void OpenSSLWrapper::handleOpenSSLError() {
+    unsigned long errCode = ERR_get_error();
+    char errBuff[256];
+    ERR_error_string_n(errCode, errBuff, sizeof(errBuff));
+    std::cerr << "OpenSSL error: " << errBuff << std::endl;
+}
