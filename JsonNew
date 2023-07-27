@@ -46,21 +46,35 @@ public:
     template<typename T>
     void addValue(const std::string& key, const T& value) {
         rapidjson::Value keyName(key.c_str(), document_.GetAllocator());
-        rapidjson::Value jsonValue;
-
-        if constexpr (std::is_same_v<T, int>) {
-            jsonValue.SetInt(value);
-        } else if constexpr (std::is_same_v<T, double>) {
-            jsonValue.SetDouble(value);
-        } else if constexpr (std::is_same_v<T, bool>) {
-            jsonValue.SetBool(value);
-        } else if constexpr (std::is_same_v<T, std::string>) {
-            jsonValue.SetString(value.c_str(), value.length(), document_.GetAllocator());
+    
+        if (document_.HasMember(key.c_str())) {
+            rapidjson::Value& existingValue = document_[key.c_str()];
+            if constexpr (std::is_same_v<T, int>) {
+                existingValue.SetInt(value);
+            } else if constexpr (std::is_same_v<T, double>) {
+                existingValue.SetDouble(value);
+            } else if constexpr (std::is_same_v<T, bool>) {
+                existingValue.SetBool(value);
+            } else if constexpr (std::is_same_v<T, std::string>) {
+                existingValue.SetString(value.c_str(), value.length(), document_.GetAllocator());
+            } else {
+                static_assert(false, "Unsupported type for addValue");
+            }
         } else {
-            static_assert(false, "Unsupported type for addValue");
+            rapidjson::Value jsonValue;
+            if constexpr (std::is_same_v<T, int>) {
+                jsonValue.SetInt(value);
+            } else if constexpr (std::is_same_v<T, double>) {
+                jsonValue.SetDouble(value);
+            } else if constexpr (std::is_same_v<T, bool>) {
+                jsonValue.SetBool(value);
+            } else if constexpr (std::is_same_v<T, std::string>) {
+                jsonValue.SetString(value.c_str(), value.length(), document_.GetAllocator());
+            } else {
+                static_assert(false, "Unsupported type for addValue");
+            }
+            document_.AddMember(keyName, jsonValue, document_.GetAllocator());
         }
-
-        document_.AddMember(keyName, jsonValue, document_.GetAllocator());
     }
 
     template<typename T>
