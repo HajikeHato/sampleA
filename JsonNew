@@ -125,7 +125,7 @@ inline void JsonWrapper::setValue(const std::string& key, const std::string& val
 template <>
 inline bool JsonWrapper::getValue(const std::string& key, std::string& value) const {
     if (data_.contains(key) && data_[key].is_string()) {
-        value = data_[key];
+        value = data_[key].get<std::string>(); // データを明示的に文字列として取得
         return true;
     }
     return false;
