@@ -14,7 +14,6 @@ class JsonWrapper {
 public:
     JsonWrapper() : document_(rapidjson::kObjectType) {}
 
-    // JSONファイルからデータを読み込む
     bool loadFromFile(const std::string& filename) {
         FILE* fp = std::fopen(filename.c_str(), "rb");
         if (!fp) {
@@ -29,7 +28,6 @@ public:
         return !document_.HasParseError();
     }
 
-    // JSONデータをファイルに書き込む
     bool saveToFile(const std::string& filename) {
         FILE* fp = std::fopen(filename.c_str(), "wb");
         if (!fp) {
@@ -45,13 +43,11 @@ public:
         return true;
     }
 
-    // JSONオブジェクトに値を追加
     template<typename T>
     void addValue(const std::string& key, const T& value) {
         rapidjson::Value keyName(key.c_str(), document_.GetAllocator());
         rapidjson::Value jsonValue;
 
-        // 値の型に合わせてJSON値を作成
         if constexpr (std::is_same_v<T, int>) {
             jsonValue.SetInt(value);
         } else if constexpr (std::is_same_v<T, double>) {
@@ -61,24 +57,31 @@ public:
         } else if constexpr (std::is_same_v<T, std::string>) {
             jsonValue.SetString(value.c_str(), value.length(), document_.GetAllocator());
         } else {
-            // その他の型はサポートされていません
             static_assert(false, "Unsupported type for addValue");
         }
 
         document_.AddMember(keyName, jsonValue, document_.GetAllocator());
     }
 
-    // JSONオブジェクトから値を取得
     template<typename T>
     T getValue(const std::string& key, const T& defaultValue = T()) const {
         if (document_.HasMember(key.c_str())) {
             const rapidjson::Value& value = document_[key.c_str()];
-            return value.Get<T>();
+
+            if constexpr (std::is_same_v<T, int>) {
+                return value.IsInt() ? value.GetInt() : defaultValue;
+            } else if constexpr (std::is_same_v<T, double>) {
+                return value.IsDouble() ? value.GetDouble() : defaultValue;
+            } else if constexpr (std::is_same_v<T, bool>) {
+                return value.IsBool() ? value.GetBool() : defaultValue;
+            } else if constexpr (std::is_same_v<T, std::string>) {
+                return value.IsString() ? std::string(value.GetString(), value.GetStringLength()) : defaultValue;
+            }
         }
+
         return defaultValue;
     }
 
-    // JSONオブジェクトに配列を追加
     template<typename T>
     void addArray(const std::string& key, const std::vector<T>& values) {
         rapidjson::Value keyName(key.c_str(), document_.GetAllocator());
@@ -95,7 +98,6 @@ public:
             } else if constexpr (std::is_same_v<T, std::string>) {
                 jsonValue.SetString(value.c_str(), value.length(), document_.GetAllocator());
             } else {
-                // その他の型はサポートされていません
                 static_assert(false, "Unsupported type for addArray");
             }
             jsonArray.PushBack(jsonValue, document_.GetAllocator());
@@ -104,7 +106,6 @@ public:
         document_.AddMember(keyName, jsonArray, document_.GetAllocator());
     }
 
-    // JSONオブジェクトから配列を取得
     template<typename T>
     std::vector<T> getArray(const std::string& key) const {
         std::vector<T> result;
@@ -114,8 +115,14 @@ public:
             if (jsonArray.IsArray()) {
                 for (rapidjson::SizeType i = 0; i < jsonArray.Size(); ++i) {
                     const rapidjson::Value& value = jsonArray[i];
-                    if (value.Is<T>()) {
-                        result.push_back(value.Get<T>());
+                    if constexpr (std::is_same_v<T, int>) {
+                        if (value.IsInt()) result.push_back(value.GetInt());
+                    } else if constexpr (std::is_same_v<T, double>) {
+                        if (value.IsDouble()) result.push_back(value.GetDouble());
+                    } else if constexpr (std::is_same_v<T, bool>) {
+                        if (value.IsBool()) result.push_back(value.GetBool());
+                    } else if constexpr (std::is_same_v<T, std::string>) {
+                        if (value.IsString()) result.push_back(std::string(value.GetString(), value.GetStringLength()));
                     }
                 }
             }
@@ -124,7 +131,6 @@ public:
         return result;
     }
 
-    // JSONオブジェクトにObjectの配列を追加
     void addObjectArray(const std::string& key, const std::vector<std::unordered_map<std::string, std::string>>& objects) {
         rapidjson::Value keyName(key.c_str(), document_.GetAllocator());
         rapidjson::Value jsonArray(rapidjson::kArrayType);
@@ -142,7 +148,6 @@ public:
         document_.AddMember(keyName, jsonArray, document_.GetAllocator());
     }
 
-    // JSONオブジェクトからObjectの配列を取得
     std::vector<std::unordered_map<std::string, std::string>> getObjectArray(const std::string& key) const {
         std::vector<std::unordered_map<std::string, std::string>> result;
 
@@ -155,7 +160,7 @@ public:
                         std::unordered_map<std::string, std::string> objectMap;
                         for (rapidjson::Value::ConstMemberIterator it = jsonObject.MemberBegin(); it != jsonObject.MemberEnd(); ++it) {
                             if (it->name.IsString() && it->value.IsString()) {
-                                objectMap[it->name.GetString()] = it->value.GetString();
+                                objectMap[it->name.GetString()] = std::string(it->value.GetString(), it->value.GetStringLength());
                             }
                         }
                         result.push_back(objectMap);
@@ -167,7 +172,6 @@ public:
         return result;
     }
 
-    // JSONオブジェクトから指定した条件に一致するObjectの配列を取得
     std::vector<std::unordered_map<std::string, std::string>> getObjectArrayByCondition(const std::string& key, const std::string& conditionKey, const std::string& conditionValue) const {
         std::vector<std::unordered_map<std::string, std::string>> result;
 
@@ -182,7 +186,7 @@ public:
                             std::unordered_map<std::string, std::string> objectMap;
                             for (rapidjson::Value::ConstMemberIterator it = jsonObject.MemberBegin(); it != jsonObject.MemberEnd(); ++it) {
                                 if (it->name.IsString() && it->value.IsString()) {
-                                    objectMap[it->name.GetString()] = it->value.GetString();
+                                    objectMap[it->name.GetString()] = std::string(it->value.GetString(), it->value.GetStringLength());
                                 }
                             }
                             result.push_back(objectMap);
