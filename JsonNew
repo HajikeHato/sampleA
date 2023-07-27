@@ -49,7 +49,23 @@ public:
     template<typename T>
     void addValue(const std::string& key, const T& value) {
         rapidjson::Value keyName(key.c_str(), document_.GetAllocator());
-        rapidjson::Value jsonValue(value);
+        rapidjson::Value jsonValue;
+    
+        // 値の型に合わせてJSON値を作成
+        if constexpr (std::is_same_v<T, int>) {
+            jsonValue.SetInt(value);
+        } else if constexpr (std::is_same_v<T, double>) {
+            jsonValue.SetDouble(value);
+        } else if constexpr (std::is_same_v<T, bool>) {
+            jsonValue.SetBool(value);
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            rapidjson::Value jsonStrValue(value.c_str(), document_.GetAllocator());
+            jsonValue.SetString(jsonStrValue.GetString(), jsonStrValue.GetStringLength(), document_.GetAllocator());
+        } else {
+            // その他の型はサポートされていません
+            static_assert(false, "Unsupported type for addValue");
+        }
+    
         document_.AddMember(keyName, jsonValue, document_.GetAllocator());
     }
 
