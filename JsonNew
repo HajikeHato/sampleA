@@ -2,9 +2,11 @@
 
 #include <iostream>
 #include <fstream>
-#include <nlohmann/json.hpp>
-
-using json = nlohmann::json;
+#include <string>
+#include <rapidjson/document.h>
+#include <rapidjson/writer.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/error/en.h>
 
 class JsonWrapper {
 public:
@@ -20,7 +22,7 @@ public:
     bool getValue(const std::string& key, T& value) const;
 
     size_t getArraySize(const std::string& key) const;
-    const json& getArrayItem(const std::string& key, size_t index) const;
+    const rapidjson::Value& getArrayItem(const std::string& key, size_t index) const;
 
     template <typename T>
     void appendToArray(const std::string& key, const T& value);
@@ -32,123 +34,69 @@ public:
     bool removeKey(const std::string& key);
     void clearArray(const std::string& key);
     bool renameKey(const std::string& oldKey, const std::string& newKey);
-    void merge(const json& otherJson);
+    void merge(const rapidjson::Value& otherJson);
     bool isEmpty() const;
     void clear();
 
 private:
-    json data_;
+    rapidjson::Document data_;
 };
-
-// ファイルからJSONデータを読み込む
-inline bool JsonWrapper::loadFromFile(const std::string& filename) {
-    std::ifstream file(filename, std::ios::in | std::ios::binary);
-    if (!file.is_open()) {
-        std::cerr << "エラー：JSONファイルを開けませんでした：" << filename << std::endl;
-        return false;
-    }
-
-    try {
-        file >> data_;
-    } catch (const std::exception& e) {
-        std::cerr << "エラー：JSONファイルのパースに失敗しました：" << e.what() << std::endl;
-        file.close();
-        return false;
-    }
-
-    file.close();
-    return true;
-}
-
-// JSONデータをファイルに保存する
-inline bool JsonWrapper::saveToFile(const std::string& filename) {
-    std::ofstream file(filename, std::ios::out | std::ios::binary);
-    if (!file.is_open()) {
-        std::cerr << "エラー：JSONファイルを作成/開けませんでした：" << filename << std::endl;
-        return false;
-    }
-
-    try {
-        file << data_.dump(4, ' ', true, nlohmann::json::error_handler_t::replace);
-    } catch (const std::exception& e) {
-        std::cerr << "エラー：JSONのシリアライズに失敗しました：" << e.what() << std::endl;
-        file.close();
-        return false;
-    }
-
-    file.close();
-    return true;
-}
 
 // インライン関数の定義
 
-inline JsonWrapper::JsonWrapper() {}
-
-inline size_t JsonWrapper::getArraySize(const std::string& key) const {
-    if (data_.contains(key) && data_[key].is_array()) {
-        return data_[key].size();
-    }
-    return 0;
-}
-
-inline const json& JsonWrapper::getArrayItem(const std::string& key, size_t index) const {
-    static json emptyObject;
-    if (data_.contains(key) && data_[key].is_array() && index < data_[key].size()) {
-        return data_[key][index];
-    }
-    return emptyObject;
+inline JsonWrapper::JsonWrapper() {
+    data_.SetObject();
 }
 
 template <typename T>
 void JsonWrapper::setValue(const std::string& key, const T& value) {
-    data_[key] = value;
+    rapidjson::Value jsonValue;
+    jsonValue.Set(value);
+    data_.AddMember(rapidjson::StringRef(key.c_str()), jsonValue, data_.GetAllocator());
 }
 
 template <typename T>
 bool JsonWrapper::getValue(const std::string& key, T& value) const {
-    if (data_.contains(key)) {
-        try {
-            if constexpr (std::is_same_v<T, std::string>) {
-                // UTF-8からロケールの文字列に変換
-                value = data_[key].get<std::string>().c_str();
-            } else {
-                value = data_[key].get<T>();
-            }
+    if (data_.HasMember(key.c_str())) {
+        const rapidjson::Value& jsonValue = data_[key.c_str()];
+        if (jsonValue.Is<T>()) {
+            value = jsonValue.Get<T>();
             return true;
-        } catch (const std::exception& e) {
-            std::cerr << "Error: Failed to get JSON value: " << e.what() << std::endl;
         }
     }
     return false;
 }
 
-template <>
-inline void JsonWrapper::setValue(const std::string& key, const std::string& value) {
-    data_[key] = value;
+inline size_t JsonWrapper::getArraySize(const std::string& key) const {
+    if (data_.HasMember(key.c_str()) && data_[key.c_str()].IsArray()) {
+        return data_[key.c_str()].Size();
+    }
+    return 0;
 }
 
-template <>
-inline bool JsonWrapper::getValue(const std::string& key, std::string& value) const {
-    if (data_.contains(key) && data_[key].is_string()) {
-        value = data_[key].get<std::string>().c_str(); // UTF-8からロケールの文字列に変換
-        return true;
+inline const rapidjson::Value& JsonWrapper::getArrayItem(const std::string& key, size_t index) const {
+    static rapidjson::Value emptyValue;
+    if (data_.HasMember(key.c_str()) && data_[key.c_str()].IsArray() && index < data_[key.c_str()].Size()) {
+        return data_[key.c_str()][index];
     }
-    return false;
+    return emptyValue;
 }
 
 template <typename T>
 void JsonWrapper::appendToArray(const std::string& key, const T& value) {
-    if (data_.contains(key) && data_[key].is_array()) {
-        data_[key].push_back(value);
+    if (!data_.HasMember(key.c_str())) {
+        data_.AddMember(rapidjson::StringRef(key.c_str()), rapidjson::Value(rapidjson::kArrayType), data_.GetAllocator());
     }
+    data_[key.c_str()].PushBack(value, data_.GetAllocator());
 }
 
 template <typename T>
 int JsonWrapper::findIndexOfValue(const std::string& key, const T& value) const {
-    if (data_.contains(key) && data_[key].is_array()) {
+    if (data_.HasMember(key.c_str()) && data_[key.c_str()].IsArray()) {
+        const auto& array = data_[key.c_str()].GetArray();
         int index = 0;
-        for (const auto& item : data_[key]) {
-            if (item == value) {
+        for (const auto& item : array) {
+            if (item.Is<T>() && item.Get<T>() == value) {
                 return index;
             }
             index++;
@@ -158,40 +106,50 @@ int JsonWrapper::findIndexOfValue(const std::string& key, const T& value) const 
 }
 
 inline bool JsonWrapper::hasKey(const std::string& key) const {
-    return data_.contains(key);
+    return data_.HasMember(key.c_str());
 }
 
 inline bool JsonWrapper::removeKey(const std::string& key) {
-    if (data_.contains(key)) {
-        data_.erase(key);
+    if (data_.HasMember(key.c_str())) {
+        data_.RemoveMember(key.c_str());
         return true;
     }
     return false;
 }
 
 inline void JsonWrapper::clearArray(const std::string& key) {
-    if (data_.contains(key) && data_[key].is_array()) {
-        data_[key].clear();
+    if (data_.HasMember(key.c_str()) && data_[key.c_str()].IsArray()) {
+        data_[key.c_str()].Clear();
     }
 }
 
 inline bool JsonWrapper::renameKey(const std::string& oldKey, const std::string& newKey) {
-    if (data_.contains(oldKey) && !data_.contains(newKey)) {
-        data_[newKey] = data_[oldKey];
-        data_.erase(oldKey);
+    if (data_.HasMember(oldKey.c_str()) && !data_.HasMember(newKey.c_str())) {
+        auto& allocator = data_.GetAllocator();
+        rapidjson::Value newKeyJsonValue;
+        newKeyJsonValue.SetString(newKey.c_str(), newKey.size(), allocator);
+        rapidjson::Value oldKeyJsonValue;
+        oldKeyJsonValue = data_[oldKey.c_str()];
+        data_.RemoveMember(oldKey.c_str());
+        data_.AddMember(newKeyJsonValue, oldKeyJsonValue, allocator);
         return true;
     }
     return false;
 }
 
-inline void JsonWrapper::merge(const json& otherJson) {
-    data_.merge_patch(otherJson);
+inline void JsonWrapper::merge(const rapidjson::Value& otherJson) {
+    if (otherJson.IsObject()) {
+        for (auto it = otherJson.MemberBegin(); it != otherJson.MemberEnd(); ++it) {
+            rapidjson::Value newKey(it->name, data_.GetAllocator());
+            data_.AddMember(newKey.Move(), it->value, data_.GetAllocator());
+        }
+    }
 }
 
 inline bool JsonWrapper::isEmpty() const {
-    return data_.empty();
+    return data_.ObjectEmpty();
 }
 
 inline void JsonWrapper::clear() {
-    data_.clear();
+    data_.SetObject();
 }
