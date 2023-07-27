@@ -40,6 +40,46 @@ private:
     json data_;
 };
 
+// ファイルからJSONデータを読み込む
+inline bool JsonWrapper::loadFromFile(const std::string& filename) {
+    std::ifstream file(filename, std::ios::in | std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "エラー：JSONファイルを開けませんでした：" << filename << std::endl;
+        return false;
+    }
+
+    try {
+        file >> data_;
+    } catch (const std::exception& e) {
+        std::cerr << "エラー：JSONファイルのパースに失敗しました：" << e.what() << std::endl;
+        file.close();
+        return false;
+    }
+
+    file.close();
+    return true;
+}
+
+// JSONデータをファイルに保存する
+inline bool JsonWrapper::saveToFile(const std::string& filename) {
+    std::ofstream file(filename, std::ios::out | std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "エラー：JSONファイルを作成/開けませんでした：" << filename << std::endl;
+        return false;
+    }
+
+    try {
+        file << data_.dump(4, ' ', true, nlohmann::json::error_handler_t::replace);
+    } catch (const std::exception& e) {
+        std::cerr << "エラー：JSONのシリアライズに失敗しました：" << e.what() << std::endl;
+        file.close();
+        return false;
+    }
+
+    file.close();
+    return true;
+}
+
 // インライン関数の定義
 
 inline JsonWrapper::JsonWrapper() {}
@@ -149,44 +189,4 @@ inline bool JsonWrapper::isEmpty() const {
 
 inline void JsonWrapper::clear() {
     data_.clear();
-}
-
-// ファイルからJSONデータを読み込む
-inline bool JsonWrapper::loadFromFile(const std::string& filename) {
-    std::ifstream file(filename, std::ios::in | std::ios::binary); // フラグを追加
-    if (!file.is_open()) {
-        std::cerr << "エラー：JSONファイルを開けませんでした：" << filename << std::endl;
-        return false;
-    }
-
-    try {
-        file >> data_;
-    } catch (const std::exception& e) {
-        std::cerr << "エラー：JSONファイルのパースに失敗しました：" << e.what() << std::endl;
-        file.close();
-        return false;
-    }
-
-    file.close();
-    return true;
-}
-
-// JSONデータをファイルに保存する
-inline bool JsonWrapper::saveToFile(const std::string& filename) {
-    std::ofstream file(filename, std::ios::out | std::ios::binary); // フラグを追加
-    if (!file.is_open()) {
-        std::cerr << "エラー：JSONファイルを作成/開けませんでした：" << filename << std::endl;
-        return false;
-    }
-
-    try {
-        file << data_.dump(4); // 4つのスペースで整形して保存
-    } catch (const std::exception& e) {
-        std::cerr << "エラー：JSONのシリアライズに失敗しました：" << e.what() << std::endl;
-        file.close();
-        return false;
-    }
-
-    file.close();
-    return true;
 }
