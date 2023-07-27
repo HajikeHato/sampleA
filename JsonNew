@@ -50,7 +50,7 @@ public:
     void addValue(const std::string& key, const T& value) {
         rapidjson::Value keyName(key.c_str(), document_.GetAllocator());
         rapidjson::Value jsonValue;
-    
+
         // 値の型に合わせてJSON値を作成
         if constexpr (std::is_same_v<T, int>) {
             jsonValue.SetInt(value);
@@ -59,13 +59,12 @@ public:
         } else if constexpr (std::is_same_v<T, bool>) {
             jsonValue.SetBool(value);
         } else if constexpr (std::is_same_v<T, std::string>) {
-            rapidjson::Value jsonStrValue(value.c_str(), document_.GetAllocator());
-            jsonValue.SetString(jsonStrValue.GetString(), jsonStrValue.GetStringLength(), document_.GetAllocator());
+            jsonValue.SetString(value.c_str(), value.length(), document_.GetAllocator());
         } else {
             // その他の型はサポートされていません
             static_assert(false, "Unsupported type for addValue");
         }
-    
+
         document_.AddMember(keyName, jsonValue, document_.GetAllocator());
     }
 
@@ -86,7 +85,19 @@ public:
         rapidjson::Value jsonArray(rapidjson::kArrayType);
 
         for (const auto& value : values) {
-            rapidjson::Value jsonValue(value);
+            rapidjson::Value jsonValue;
+            if constexpr (std::is_same_v<T, int>) {
+                jsonValue.SetInt(value);
+            } else if constexpr (std::is_same_v<T, double>) {
+                jsonValue.SetDouble(value);
+            } else if constexpr (std::is_same_v<T, bool>) {
+                jsonValue.SetBool(value);
+            } else if constexpr (std::is_same_v<T, std::string>) {
+                jsonValue.SetString(value.c_str(), value.length(), document_.GetAllocator());
+            } else {
+                // その他の型はサポートされていません
+                static_assert(false, "Unsupported type for addArray");
+            }
             jsonArray.PushBack(jsonValue, document_.GetAllocator());
         }
 
@@ -148,6 +159,34 @@ public:
                             }
                         }
                         result.push_back(objectMap);
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    // JSONオブジェクトから指定した条件に一致するObjectの配列を取得
+    std::vector<std::unordered_map<std::string, std::string>> getObjectArrayByCondition(const std::string& key, const std::string& conditionKey, const std::string& conditionValue) const {
+        std::vector<std::unordered_map<std::string, std::string>> result;
+
+        if (document_.HasMember(key.c_str())) {
+            const rapidjson::Value& jsonArray = document_[key.c_str()];
+            if (jsonArray.IsArray()) {
+                for (rapidjson::SizeType i = 0; i < jsonArray.Size(); ++i) {
+                    const rapidjson::Value& jsonObject = jsonArray[i];
+                    if (jsonObject.IsObject()) {
+                        std::string value = jsonObject[conditionKey.c_str()].GetString();
+                        if (value == conditionValue) {
+                            std::unordered_map<std::string, std::string> objectMap;
+                            for (rapidjson::Value::ConstMemberIterator it = jsonObject.MemberBegin(); it != jsonObject.MemberEnd(); ++it) {
+                                if (it->name.IsString() && it->value.IsString()) {
+                                    objectMap[it->name.GetString()] = it->value.GetString();
+                                }
+                            }
+                            result.push_back(objectMap);
+                        }
                     }
                 }
             }
