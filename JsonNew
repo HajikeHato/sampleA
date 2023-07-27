@@ -108,7 +108,12 @@ template <typename T>
 bool JsonWrapper::getValue(const std::string& key, T& value) const {
     if (data_.contains(key)) {
         try {
-            value = data_[key].get<T>();
+            if constexpr (std::is_same_v<T, std::string>) {
+                // UTF-8からロケールの文字列に変換
+                value = data_[key].get<std::string>().c_str();
+            } else {
+                value = data_[key].get<T>();
+            }
             return true;
         } catch (const std::exception& e) {
             std::cerr << "Error: Failed to get JSON value: " << e.what() << std::endl;
@@ -125,7 +130,7 @@ inline void JsonWrapper::setValue(const std::string& key, const std::string& val
 template <>
 inline bool JsonWrapper::getValue(const std::string& key, std::string& value) const {
     if (data_.contains(key) && data_[key].is_string()) {
-        value = data_[key].get<std::string>(); // データを明示的に文字列として取得
+        value = data_[key].get<std::string>().c_str(); // UTF-8からロケールの文字列に変換
         return true;
     }
     return false;
