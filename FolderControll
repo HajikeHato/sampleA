@@ -1,0 +1,6 @@
+        for (const auto& entry : fs::directory_iterator(folderPath)) {
+            if (fs::is_regular_file(entry)) {
+                fs::remove(entry);
+                std::cout << "Deleted file: " << entry.path() << std::endl;
+            }
+        }
