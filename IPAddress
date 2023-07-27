@@ -3,3 +3,27 @@ std::string sockaddr_in_to_string(const sockaddr_in& addr) {
     inet_ntop(AF_INET, &(addr.sin_addr), ip_str, INET_ADDRSTRLEN);
     return std::string(ip_str);
 }
+
+#include <iostream>
+#include <netinet/in.h> // sockaddr_in構造体の定義に必要
+
+std::string sockaddr_in_to_string(const sockaddr_in& addr) {
+    return std::string(inet_ntoa(addr.sin_addr));
+}
+
+
+
+std::string sockaddr_in_to_string(const sockaddr_in& addr) {
+    uint32_t ipAddr = addr.sin_addr.s_addr;
+
+    // IPアドレスはリトルエンディアンで格納されるため、ビッグエンディアンに変換
+    ipAddr = htonl(ipAddr);
+
+    // 各オクテットを取得して文字列に変換
+    uint8_t octet1 = (ipAddr >> 24) & 0xFF;
+    uint8_t octet2 = (ipAddr >> 16) & 0xFF;
+    uint8_t octet3 = (ipAddr >> 8) & 0xFF;
+    uint8_t octet4 = ipAddr & 0xFF;
+
+    return std::to_string(octet1) + "." + std::to_string(octet2) + "." + std::to_string(octet3) + "." + std::to_string(octet4);
+}
