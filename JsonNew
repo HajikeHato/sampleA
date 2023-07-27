@@ -1,94 +1,147 @@
-#pragma once
+#ifndef JSON_WRAPPER_H
+#define JSON_WRAPPER_H
 
-#include <iostream>
-#include <fstream>
+#include <rapidjson/document.h>
+#include <rapidjson/prettywriter.h>
+#include <rapidjson/filereadstream.h>
+#include <rapidjson/filewritestream.h>
+#include <cstdio>
+#include <string>
 #include <vector>
-#include "rapidjson/document.h"
-#include "rapidjson/writer.h"
-#include "rapidjson/stringbuffer.h"
+#include <unordered_map>
 
-class JSONWrapper {
+class JsonWrapper {
 public:
-    rapidjson::Document document;
+    JsonWrapper() : document_(rapidjson::kObjectType) {}
 
-    JSONWrapper() {
-        document.SetObject();
-    }
-
+    // JSONファイルからデータを読み込む
     bool loadFromFile(const std::string& filename) {
-        std::ifstream ifs(filename);
-        if (!ifs.is_open()) {
+        FILE* fp = std::fopen(filename.c_str(), "rb");
+        if (!fp) {
             return false;
         }
 
-        rapidjson::IStreamWrapper isw(ifs);
-        document.ParseStream(isw);
+        char buffer[65536]; // 64KB
+        rapidjson::FileReadStream is(fp, buffer, sizeof(buffer));
+        document_.ParseStream(is);
 
-        return !document.HasParseError();
+        std::fclose(fp);
+        return !document_.HasParseError();
     }
 
+    // JSONデータをファイルに書き込む
     bool saveToFile(const std::string& filename) {
-        std::ofstream ofs(filename);
-        if (!ofs.is_open()) {
+        FILE* fp = std::fopen(filename.c_str(), "wb");
+        if (!fp) {
             return false;
         }
 
-        rapidjson::OStreamWrapper osw(ofs);
-        rapidjson::Writer<rapidjson::OStreamWrapper> writer(osw);
-        document.Accept(writer);
+        char buffer[65536]; // 64KB
+        rapidjson::FileWriteStream os(fp, buffer, sizeof(buffer));
+        rapidjson::PrettyWriter<rapidjson::FileWriteStream> writer(os);
+        document_.Accept(writer);
 
+        std::fclose(fp);
         return true;
     }
 
+    // JSONオブジェクトに値を追加
     template<typename T>
-    void setValue(const std::string& key, const T& value) {
-        rapidjson::Value v(value);
-        document.AddMember(rapidjson::StringRef(key.c_str()), v, document.GetAllocator());
+    void addValue(const std::string& key, const T& value) {
+        rapidjson::Value keyName(key.c_str(), document_.GetAllocator());
+        rapidjson::Value jsonValue(value);
+        document_.AddMember(keyName, jsonValue, document_.GetAllocator());
     }
 
+    // JSONオブジェクトから値を取得
     template<typename T>
-    bool getValue(const std::string& key, T& value) const {
-        if (!document.HasMember(key.c_str())) {
-            return false;
+    T getValue(const std::string& key, const T& defaultValue = T()) const {
+        if (document_.HasMember(key.c_str())) {
+            const rapidjson::Value& value = document_[key.c_str()];
+            return value.Get<T>();
         }
-
-        const rapidjson::Value& v = document[key.c_str()];
-        if (!v.Is<T>()) {
-            return false;
-        }
-
-        value = v.Get<T>();
-        return true;
+        return defaultValue;
     }
 
-    void addArrayElement(const rapidjson::Value& element) {
-        if (!document.IsArray()) {
-            document.SetArray();
+    // JSONオブジェクトに配列を追加
+    template<typename T>
+    void addArray(const std::string& key, const std::vector<T>& values) {
+        rapidjson::Value keyName(key.c_str(), document_.GetAllocator());
+        rapidjson::Value jsonArray(rapidjson::kArrayType);
+
+        for (const auto& value : values) {
+            rapidjson::Value jsonValue(value);
+            jsonArray.PushBack(jsonValue, document_.GetAllocator());
         }
-        document.PushBack(element, document.GetAllocator());
+
+        document_.AddMember(keyName, jsonArray, document_.GetAllocator());
     }
 
-    bool getArrayElement(size_t index, rapidjson::Value& element) const {
-        if (!document.IsArray() || index >= document.Size()) {
-            return false;
-        }
+    // JSONオブジェクトから配列を取得
+    template<typename T>
+    std::vector<T> getArray(const std::string& key) const {
+        std::vector<T> result;
 
-        element.CopyFrom(document[index], document.GetAllocator());
-        return true;
-    }
-
-    bool findArrayElement(const std::string& key, const std::string& value, rapidjson::Value& element) const {
-        if (!document.IsArray()) {
-            return false;
-        }
-
-        for (rapidjson::Value::ConstValueIterator it = document.Begin(); it != document.End(); ++it) {
-            if ((*it).HasMember(key.c_str()) && (*it)[key.c_str()].IsString() && (*it)[key.c_str()].GetString() == value) {
-                element.CopyFrom(*it, document.GetAllocator());
-                return true;
+        if (document_.HasMember(key.c_str())) {
+            const rapidjson::Value& jsonArray = document_[key.c_str()];
+            if (jsonArray.IsArray()) {
+                for (rapidjson::SizeType i = 0; i < jsonArray.Size(); ++i) {
+                    const rapidjson::Value& value = jsonArray[i];
+                    if (value.Is<T>()) {
+                        result.push_back(value.Get<T>());
+                    }
+                }
             }
         }
 
-        return false;
+        return result;
     }
+
+    // JSONオブジェクトにObjectの配列を追加
+    void addObjectArray(const std::string& key, const std::vector<std::unordered_map<std::string, std::string>>& objects) {
+        rapidjson::Value keyName(key.c_str(), document_.GetAllocator());
+        rapidjson::Value jsonArray(rapidjson::kArrayType);
+
+        for (const auto& object : objects) {
+            rapidjson::Value jsonObject(rapidjson::kObjectType);
+            for (const auto& pair : object) {
+                rapidjson::Value jsonKey(pair.first.c_str(), document_.GetAllocator());
+                rapidjson::Value jsonValue(pair.second.c_str(), document_.GetAllocator());
+                jsonObject.AddMember(jsonKey, jsonValue, document_.GetAllocator());
+            }
+            jsonArray.PushBack(jsonObject, document_.GetAllocator());
+        }
+
+        document_.AddMember(keyName, jsonArray, document_.GetAllocator());
+    }
+
+    // JSONオブジェクトからObjectの配列を取得
+    std::vector<std::unordered_map<std::string, std::string>> getObjectArray(const std::string& key) const {
+        std::vector<std::unordered_map<std::string, std::string>> result;
+
+        if (document_.HasMember(key.c_str())) {
+            const rapidjson::Value& jsonArray = document_[key.c_str()];
+            if (jsonArray.IsArray()) {
+                for (rapidjson::SizeType i = 0; i < jsonArray.Size(); ++i) {
+                    const rapidjson::Value& jsonObject = jsonArray[i];
+                    if (jsonObject.IsObject()) {
+                        std::unordered_map<std::string, std::string> objectMap;
+                        for (rapidjson::Value::ConstMemberIterator it = jsonObject.MemberBegin(); it != jsonObject.MemberEnd(); ++it) {
+                            if (it->name.IsString() && it->value.IsString()) {
+                                objectMap[it->name.GetString()] = it->value.GetString();
+                            }
+                        }
+                        result.push_back(objectMap);
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+private:
+    rapidjson::Document document_;
 };
+
+#endif // JSON_WRAPPER_H
