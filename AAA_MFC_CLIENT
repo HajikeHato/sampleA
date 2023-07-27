@@ -1,0 +1,150 @@
+ヘッダ
+
+#pragma once
+#include "OpenSSLWrapper.h"
+
+class CMyClientDlg : public CDialogEx {
+public:
+    CMyClientDlg(CWnd* pParent = nullptr);
+
+#ifdef AFX_DESIGN_TIME
+    enum { IDD = IDD_MY_CLIENT_DIALOG };
+#endif
+
+protected:
+    virtual void DoDataExchange(CDataExchange* pDX);
+
+protected:
+    HICON m_hIcon;
+    BOOL m_bConnected;
+    OpenSSLWrapper m_sslWrapper;
+    SOCKET m_clientSocket;
+
+    virtual BOOL OnInitDialog();
+    afx_msg void OnPaint();
+    afx_msg HCURSOR OnQueryDragIcon();
+    DECLARE_MESSAGE_MAP()
+public:
+    afx_msg void OnBnClickedConnectButton();
+    afx_msg void OnBnClickedDisconnectButton();
+    afx_msg void OnDestroy();
+};
+
+
+ソース
+#include "stdafx.h"
+#include "MyClientDlg.h"
+
+#ifdef _DEBUG
+#define new DEBUG_NEW
+#endif
+
+CMyClientDlg::CMyClientDlg(CWnd* pParent /*=nullptr*/)
+    : CDialogEx(IDD_MY_CLIENT_DIALOG, pParent), m_bConnected(FALSE), m_clientSocket(INVALID_SOCKET) {
+    m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
+}
+
+void CMyClientDlg::DoDataExchange(CDataExchange* pDX) {
+    CDialogEx::DoDataExchange(pDX);
+}
+
+BEGIN_MESSAGE_MAP(CMyClientDlg, CDialogEx)
+    ON_WM_PAINT()
+    ON_WM_QUERYDRAGICON()
+    ON_BN_CLICKED(IDC_CONNECT_BUTTON, &CMyClientDlg::OnBnClickedConnectButton)
+    ON_BN_CLICKED(IDC_DISCONNECT_BUTTON, &CMyClientDlg::OnBnClickedDisconnectButton)
+    ON_WM_DESTROY()
+END_MESSAGE_MAP()
+
+BOOL CMyClientDlg::OnInitDialog() {
+    CDialogEx::OnInitDialog();
+    SetIcon(m_hIcon, TRUE);
+    SetIcon(m_hIcon, FALSE);
+    return TRUE;
+}
+
+void CMyClientDlg::OnPaint() {
+    if (IsIconic()) {
+        CPaintDC dc(this);
+        SendMessage(WM_ICONERASEBKGND, reinterpret_cast<WPARAM>(dc.GetSafeHdc()), 0);
+        int cxIcon = GetSystemMetrics(SM_CXICON);
+        int cyIcon = GetSystemMetrics(SM_CYICON);
+        CRect rect;
+        GetClientRect(&rect);
+        int x = (rect.Width() - cxIcon + 1) / 2;
+        int y = (rect.Height() - cyIcon + 1) / 2;
+        dc.DrawIcon(x, y, m_hIcon);
+    }
+    else {
+        CDialogEx::OnPaint();
+    }
+}
+
+HCURSOR CMyClientDlg::OnQueryDragIcon() {
+    return static_cast<HCURSOR>(m_hIcon);
+}
+
+void CMyClientDlg::OnBnClickedConnectButton() {
+    if (m_bConnected) {
+        AfxMessageBox(_T("Already connected."));
+        return;
+    }
+
+    // サーバーのIPアドレスとポート番号を指定
+    const char* serverIp = "127.0.0.1"; // サーバーのIPアドレスを指定
+    int serverPort = 443; // サーバーのポート番号を指定
+
+    // ソケットの作成
+    m_clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (m_clientSocket == INVALID_SOCKET) {
+        AfxMessageBox(_T("Failed to create socket."));
+        return;
+    }
+
+    sockaddr_in serverAddr;
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(serverPort);
+    inet_pton(AF_INET, serverIp, &(serverAddr.sin_addr));
+
+    // サーバーに接続
+    if (connect(m_clientSocket, (sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
+        AfxMessageBox(_T("Failed to connect to the server."));
+        closesocket(m_clientSocket);
+        return;
+    }
+
+    // SSL通信の初期化
+    m_sslWrapper.initializeClient();
+
+    // SSL接続の確立
+    if (!m_sslWrapper.connect(m_clientSocket)) {
+        AfxMessageBox(_T("Failed to establish SSL connection."));
+        closesocket(m_clientSocket);
+        return;
+    }
+
+    m_bConnected = TRUE;
+    AfxMessageBox(_T("Connected to the server."));
+}
+
+void CMyClientDlg::OnBnClickedDisconnectButton() {
+    if (!m_bConnected) {
+        AfxMessageBox(_T("Not connected."));
+        return;
+    }
+
+    // SSL通信の終了
+    m_sslWrapper.disconnect();
+
+    // ソケットを閉じる
+    closesocket(m_clientSocket);
+
+    m_bConnected = FALSE;
+    AfxMessageBox(_T("Disconnected from the server."));
+}
+
+void CMyClientDlg::OnDestroy() {
+    OnBnClickedDisconnectButton(); // アプリケーション終了時に接続を切断する
+
+    CDialogEx::OnDestroy();
+}
