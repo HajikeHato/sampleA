@@ -8,7 +8,7 @@ using json = nlohmann::json;
 
 class JsonWrapper {
 public:
-    JsonWrapper() = default;
+    JsonWrapper();
 
     bool loadFromFile(const std::string& filename);
     bool saveToFile(const std::string& filename);
@@ -36,118 +36,120 @@ public:
     bool isEmpty() const;
     void clear();
 
-    // インライン関数の定義
-
-    inline size_t getArraySize(const std::string& key) const {
-        if (data_.contains(key) && data_[key].is_array()) {
-            return data_[key].size();
-        }
-        return 0;
-    }
-
-    inline const json& getArrayItem(const std::string& key, size_t index) const {
-        static json emptyObject;
-        if (data_.contains(key) && data_[key].is_array() && index < data_[key].size()) {
-            return data_[key][index];
-        }
-        return emptyObject;
-    }
-
-    template <typename T>
-    inline void setValue(const std::string& key, const T& value) {
-        data_[key] = value;
-    }
-
-    template <typename T>
-    inline bool getValue(const std::string& key, T& value) const {
-        if (data_.contains(key)) {
-            try {
-                value = data_[key].get<T>();
-                return true;
-            } catch (const std::exception& e) {
-                std::cerr << "Error: Failed to get JSON value: " << e.what() << std::endl;
-            }
-        }
-        return false;
-    }
-
-    template <>
-    inline void setValue(const std::string& key, const std::string& value) {
-        data_[key] = value;
-    }
-
-    template <>
-    inline bool getValue(const std::string& key, std::string& value) const {
-        if (data_.contains(key) && data_[key].is_string()) {
-            value = data_[key];
-            return true;
-        }
-        return false;
-    }
-
-    template <typename T>
-    inline void appendToArray(const std::string& key, const T& value) {
-        if (data_.contains(key) && data_[key].is_array()) {
-            data_[key].push_back(value);
-        }
-    }
-
-    template <typename T>
-    inline int findIndexOfValue(const std::string& key, const T& value) const {
-        if (data_.contains(key) && data_[key].is_array()) {
-            int index = 0;
-            for (const auto& item : data_[key]) {
-                if (item == value) {
-                    return index;
-                }
-                index++;
-            }
-        }
-        return -1;
-    }
-
-    inline bool hasKey(const std::string& key) const {
-        return data_.contains(key);
-    }
-
-    inline bool removeKey(const std::string& key) {
-        if (data_.contains(key)) {
-            data_.erase(key);
-            return true;
-        }
-        return false;
-    }
-
-    inline void clearArray(const std::string& key) {
-        if (data_.contains(key) && data_[key].is_array()) {
-            data_[key].clear();
-        }
-    }
-
-    inline bool renameKey(const std::string& oldKey, const std::string& newKey) {
-        if (data_.contains(oldKey) && !data_.contains(newKey)) {
-            data_[newKey] = data_[oldKey];
-            data_.erase(oldKey);
-            return true;
-        }
-        return false;
-    }
-
-    inline void merge(const json& otherJson) {
-        data_.merge_patch(otherJson);
-    }
-
-    inline bool isEmpty() const {
-        return data_.empty();
-    }
-
-    inline void clear() {
-        data_.clear();
-    }
-
 private:
     json data_;
 };
+
+// インライン関数の定義
+
+inline JsonWrapper::JsonWrapper() {}
+
+inline size_t JsonWrapper::getArraySize(const std::string& key) const {
+    if (data_.contains(key) && data_[key].is_array()) {
+        return data_[key].size();
+    }
+    return 0;
+}
+
+inline const json& JsonWrapper::getArrayItem(const std::string& key, size_t index) const {
+    static json emptyObject;
+    if (data_.contains(key) && data_[key].is_array() && index < data_[key].size()) {
+        return data_[key][index];
+    }
+    return emptyObject;
+}
+
+template <typename T>
+void JsonWrapper::setValue(const std::string& key, const T& value) {
+    data_[key] = value;
+}
+
+template <typename T>
+bool JsonWrapper::getValue(const std::string& key, T& value) const {
+    if (data_.contains(key)) {
+        try {
+            value = data_[key].get<T>();
+            return true;
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Failed to get JSON value: " << e.what() << std::endl;
+        }
+    }
+    return false;
+}
+
+template <>
+inline void JsonWrapper::setValue(const std::string& key, const std::string& value) {
+    data_[key] = value;
+}
+
+template <>
+inline bool JsonWrapper::getValue(const std::string& key, std::string& value) const {
+    if (data_.contains(key) && data_[key].is_string()) {
+        value = data_[key];
+        return true;
+    }
+    return false;
+}
+
+template <typename T>
+void JsonWrapper::appendToArray(const std::string& key, const T& value) {
+    if (data_.contains(key) && data_[key].is_array()) {
+        data_[key].push_back(value);
+    }
+}
+
+template <typename T>
+int JsonWrapper::findIndexOfValue(const std::string& key, const T& value) const {
+    if (data_.contains(key) && data_[key].is_array()) {
+        int index = 0;
+        for (const auto& item : data_[key]) {
+            if (item == value) {
+                return index;
+            }
+            index++;
+        }
+    }
+    return -1;
+}
+
+inline bool JsonWrapper::hasKey(const std::string& key) const {
+    return data_.contains(key);
+}
+
+inline bool JsonWrapper::removeKey(const std::string& key) {
+    if (data_.contains(key)) {
+        data_.erase(key);
+        return true;
+    }
+    return false;
+}
+
+inline void JsonWrapper::clearArray(const std::string& key) {
+    if (data_.contains(key) && data_[key].is_array()) {
+        data_[key].clear();
+    }
+}
+
+inline bool JsonWrapper::renameKey(const std::string& oldKey, const std::string& newKey) {
+    if (data_.contains(oldKey) && !data_.contains(newKey)) {
+        data_[newKey] = data_[oldKey];
+        data_.erase(oldKey);
+        return true;
+    }
+    return false;
+}
+
+inline void JsonWrapper::merge(const json& otherJson) {
+    data_.merge_patch(otherJson);
+}
+
+inline bool JsonWrapper::isEmpty() const {
+    return data_.empty();
+}
+
+inline void JsonWrapper::clear() {
+    data_.clear();
+}
 
 // ファイルからJSONデータを読み込む
 inline bool JsonWrapper::loadFromFile(const std::string& filename) {
