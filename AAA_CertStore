@@ -1,0 +1,125 @@
+#include <stdio.h>
+#include <Windows.h>
+#include <wincrypt.h>
+
+int main() {
+    const char *certSubjectName = "your_cert_subject_name_here"; // 証明書のサブジェクト名
+    HCERTSTORE hStore = NULL;
+    PCCERT_CONTEXT pCertContext = NULL;
+
+    // 証明書ストアを開く
+    hStore = CertOpenSystemStore(NULL, "MY");
+    if (!hStore) {
+        printf("証明書ストアが開けませんでした。\n");
+        return -1;
+    }
+
+    // 証明書を検索する
+    pCertContext = CertFindCertificateInStore(hStore, 
+        X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0,
+        CERT_FIND_SUBJECT_STR, certSubjectName, NULL);
+    
+    if (!pCertContext) {
+        printf("証明書が見つかりませんでした。\n");
+        CertCloseStore(hStore, 0);
+        return -1;
+    }
+
+    // 証明書と秘密鍵のバイナリデータを取得
+    DATA_BLOB p12Data;
+    if (!PFXExportCertStoreEx(hStore, &p12Data, NULL, NULL, EXPORT_PRIVATE_KEYS | REPORT_NOT_ABLE_TO_EXPORT_PRIVATE_KEY)) {
+        printf("PKCS12形式のデータを取得できませんでした。\n");
+        CertFreeCertificateContext(pCertContext);
+        CertCloseStore(hStore, 0);
+        return -1;
+    }
+
+    // p12Dataの中に証明書と秘密鍵のデータが含まれています
+    // p12Data.pbData がバイナリデータ、p12Data.cbData がバイト数
+
+    // 必要な処理を行う
+    // ...
+
+    // 解放処理
+    LocalFree(p12Data.pbData);
+    CertFreeCertificateContext(pCertContext);
+    CertCloseStore(hStore, 0);
+
+    return 0;
+}
+
+
+
+
+OpenSSLで使うならこう？
+#include <stdio.h>
+#include <openssl/pem.h>
+#include <openssl/pkcs12.h>
+#include <openssl/x509.h>
+#include <openssl/ssl.h>
+
+int main() {
+    const char *password = "your_password_here"; // PKCS12ファイルのパスワード
+
+    // バイナリデータからPKCS12を読み込む
+    BIO *p12bio = BIO_new_mem_buf(p12Data.pbData, p12Data.cbData);
+    if (!p12bio) {
+        printf("PKCS12を読み込めませんでした。\n");
+        return -1;
+    }
+
+    PKCS12 *p12 = d2i_PKCS12_bio(p12bio, NULL);
+    if (!p12) {
+        printf("PKCS12を解析できませんでした。\n");
+        BIO_free(p12bio);
+        return -1;
+    }
+
+    // PKCS12から証明書と秘密鍵を取得
+    EVP_PKEY *pkey;
+    X509 *cert;
+    STACK_OF(X509) *ca = NULL;
+    if (!PKCS12_parse(p12, password, &pkey, &cert, &ca)) {
+        printf("PKCS12から証明書と秘密鍵を取得できませんでした。\n");
+        PKCS12_free(p12);
+        BIO_free(p12bio);
+        return -1;
+    }
+
+    // サーバ証明書と秘密鍵を使ってSSL_CTXを作成
+    SSL_CTX *ctx = SSL_CTX_new(SSLv23_server_method());
+    if (!ctx) {
+        printf("SSL_CTXの作成に失敗しました。\n");
+        EVP_PKEY_free(pkey);
+        X509_free(cert);
+        sk_X509_pop_free(ca, X509_free);
+        PKCS12_free(p12);
+        BIO_free(p12bio);
+        return -1;
+    }
+
+    if (SSL_CTX_use_certificate(ctx, cert) <= 0 ||
+        SSL_CTX_use_PrivateKey(ctx, pkey) <= 0) {
+        printf("証明書と秘密鍵の設定に失敗しました。\n");
+        SSL_CTX_free(ctx);
+        EVP_PKEY_free(pkey);
+        X509_free(cert);
+        sk_X509_pop_free(ca, X509_free);
+        PKCS12_free(p12);
+        BIO_free(p12bio);
+        return -1;
+    }
+
+    // 必要な処理を行う
+    // ...
+
+    // 解放処理
+    SSL_CTX_free(ctx);
+    EVP_PKEY_free(pkey);
+    X509_free(cert);
+    sk_X509_pop_free(ca, X509_free);
+    PKCS12_free(p12);
+    BIO_free(p12bio);
+
+    return 0;
+}
