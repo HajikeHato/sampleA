@@ -1,0 +1,39 @@
+#include <stdio.h>
+#include <openssl/x509.h>
+#include <openssl/pem.h>
+#include <wincrypt.h>
+
+#pragma comment(lib, "crypt32.lib")
+
+int main() {
+    // Windows証明書ストアを開く
+    HCERTSTORE hCertStore = CertOpenSystemStore(NULL, "MY");
+    if (hCertStore == NULL) {
+        printf("Failed to open personal certificate store.\n");
+        return 1;
+    }
+
+    // 証明書を取得
+    PCCERT_CONTEXT pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_ANY, nullptr, nullptr);
+    if (pCertContext == nullptr) {
+        printf("Failed to find a certificate.\n");
+        CertCloseStore(hCertStore, 0);
+        return 1;
+    }
+
+    // PEM形式で証明書をファイルに書き出し
+    FILE* fp = fopen("certificate.pem", "wb");
+    if (fp != NULL) {
+        PEM_write_X509(fp, pCertContext->pCertInfo);
+        fclose(fp);
+        printf("Certificate written to certificate.pem in PEM format.\n");
+    } else {
+        printf("Failed to open file for writing.\n");
+    }
+
+    // リソースの解放
+    CertFreeCertificateContext(pCertContext);
+    CertCloseStore(hCertStore, 0);
+
+    return 0;
+}
