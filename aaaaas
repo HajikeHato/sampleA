@@ -1,0 +1,67 @@
+`PFXExportCertStoreEx`関数は、指定された証明書ストア内のすべての証明書をPFX（PKCS#12）形式でエクスポートするための関数です。一部の証明書だけを出力したい場合は、別の方法を使用する必要があります。
+
+特定の証明書をエクスポートする方法としては、以下の手順を考えることができます：
+
+1. 証明書ストアを開く（`CertOpenSystemStore`を使用）。
+2. 証明書の検索方法を指定して、エクスポートしたい証明書を見つける（`CertFindCertificateInStore`を使用）。
+3. 見つけた証明書を新しい証明書ストアに追加する（`CertAddCertificateContextToStore`を使用）。
+4. 新しい証明書ストアをPFX形式でエクスポートする（`PFXExportCertStoreEx`を使用）。
+
+以下は、この手順に従ったサンプルコードです：
+
+```cpp
+#include <windows.h>
+#include <wincrypt.h>
+
+#pragma comment(lib, "crypt32.lib")
+
+int main() {
+    const char* targetSubjectName = "TargetCertificate"; // エクスポートしたい証明書のサブジェクト名（DN）を指定
+
+    // 元の証明書ストアを開く
+    HCERTSTORE hOriginalCertStore = CertOpenSystemStore(NULL, "MY");
+    if (hOriginalCertStore == NULL) {
+        printf("Failed to open the original certificate store.\n");
+        return 1;
+    }
+
+    // 新しい証明書ストアを作成
+    HCERTSTORE hNewCertStore = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, NULL, 0, NULL);
+    if (hNewCertStore == NULL) {
+        printf("Failed to create a new certificate store.\n");
+        CertCloseStore(hOriginalCertStore, 0);
+        return 1;
+    }
+
+    // 証明書を検索して新しいストアに追加
+    PCCERT_CONTEXT pCertContext = NULL;
+    while ((pCertContext = CertFindCertificateInStore(hOriginalCertStore, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_ANY, NULL, pCertContext)) != NULL) {
+        // サブジェクト名（DN）が一致する場合にのみ追加
+        if (CertGetNameString(pCertContext, CERT_NAME_SIMPLE_DISPLAY_TYPE, 0, NULL, NULL, 0) > 0) {
+            if (strcmp(targetSubjectName, (char*)pCertContext->pCertInfo->Subject.pbData) == 0) {
+                if (!CertAddCertificateContextToStore(hNewCertStore, pCertContext, CERT_STORE_ADD_ALWAYS, NULL)) {
+                    printf("Failed to add the certificate to the new store.\n");
+                }
+            }
+        }
+    }
+
+    // 新しいストアをPFX形式でエクスポート
+    CRYPT_DATA_BLOB pfxBlob;
+    if (PFXExportCertStoreEx(hNewCertStore, &pfxBlob, NULL, NULL, EXPORT_PRIVATE_KEYS | REPORT_NOT_ABLE_TO_EXPORT_PRIVATE_KEY)) {
+        // ここで pfxBlob バッファにPFXデータが格納される
+        // PFXデータをファイル等に保存する処理を追加する
+        LocalFree(pfxBlob.pbData);
+    } else {
+        printf("Failed to export the PFX data.\n");
+    }
+
+    // リソースの解放
+    CertCloseStore(hOriginalCertStore, 0);
+    CertCloseStore(hNewCertStore, 0);
+
+    return 0;
+}
+```
+
+このサンプルコードでは、指定したサブジェクト名（DN）が一致する証明書のみが新しい証明書ストアに追加され、それをPFX形式でエクスポートします。必要に応じて、新しい証明書ストアから証明書を取り出して、他の処理を行うことも可能です。
