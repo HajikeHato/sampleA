@@ -1,0 +1,80 @@
+申し訳ありませんが、先程のサンプルコードではRSA秘密鍵をEVP_PKEYにセットしていたため、ECDSA秘密鍵をサポートするように変更が必要です。ECDSA秘密鍵を利用する場合は、以下のように修正する必要があります。
+
+```cpp
+#include <windows.h>
+#include <wincrypt.h>
+#include <stdio.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
+int main()
+{
+    // 証明書ストアを開く
+    HCERTSTORE hCertStore = CertOpenSystemStore(NULL, L"MY");
+    if (!hCertStore)
+    {
+        printf("証明書ストアを開けませんでした。\n");
+        return 1;
+    }
+
+    // 証明書を取得
+    PCCERT_CONTEXT pCertContext = CertFindCertificateInStore(hCertStore,
+        X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_SUBJECT_STR,
+        L"サブジェクト名または証明書のシリアル番号", NULL);
+    if (!pCertContext)
+    {
+        printf("証明書を見つけられませんでした。\n");
+        CertCloseStore(hCertStore, 0);
+        return 1;
+    }
+
+    // 秘密鍵を取得
+    HCRYPTPROV_OR_NCRYPT_KEY_HANDLE hCryptProv;
+    DWORD dwKeySpec;
+    BOOL bCallerFreeProv = FALSE;
+    if (!CryptAcquireCertificatePrivateKey(pCertContext, 0, NULL, &hCryptProv, &dwKeySpec, NULL))
+    {
+        printf("秘密鍵を取得できませんでした。\n");
+        CertFreeCertificateContext(pCertContext);
+        CertCloseStore(hCertStore, 0);
+        return 1;
+    }
+
+    // OpenSSLの初期化
+    SSL_library_init();
+    OpenSSL_add_all_algorithms();
+    SSL_load_error_strings();
+    
+    // EVP_PKEYを作成
+    EVP_PKEY *pkey = EVP_PKEY_new();
+    if (!pkey)
+    {
+        printf("EVP_PKEYの作成に失敗しました。\n");
+        CryptReleaseContext(hCryptProv, 0);
+        CertFreeCertificateContext(pCertContext);
+        CertCloseStore(hCertStore, 0);
+        return 1;
+    }
+
+    // ECDSA秘密鍵をEVP_PKEYにセット
+    EVP_PKEY_set1_EC_KEY(pkey, (EC_KEY *)hCryptProv);
+
+    // ここでOpenSSLを使ったサーバのセットアップや通信を行う
+
+    // EVP_PKEYを解放
+    EVP_PKEY_free(pkey);
+
+    // 秘密鍵を解放
+    CryptReleaseContext(hCryptProv, 0);
+
+    // 証明書コンテキストを解放
+    CertFreeCertificateContext(pCertContext);
+
+    // 証明書ストアを閉じる
+    CertCloseStore(hCertStore, 0);
+
+    return 0;
+}
+```
+
+修正により、ECDSA秘密鍵を利用するように変更されました。ECDSA秘密鍵をEVP_PKEYにセットするために、`EVP_PKEY_set1_EC_KEY()`関数を使用しています。このコードを利用する際には、必要なOpenSSLライブラリをリンクしていることを確認してください。また、秘密鍵の取得やOpenSSLの初期化時にエラーが発生した場合は、エラーメッセージをチェックして問題を特定することが重要です。
