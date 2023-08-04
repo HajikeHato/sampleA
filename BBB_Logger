@@ -1,4 +1,4 @@
-もちろん、全文でLoggerクラスのヘッダファイルとソースファイルを提示します。
+申し訳ありません。以下にLoggerクラスのヘッダファイルとソースファイルの全文を示します。
 
 **Logger.h**:
 
@@ -14,6 +14,7 @@ public:
 
 private:
     static std::ofstream logFile;
+    static std::string getCurrentDate();
     static std::string getLogFilePath();
 };
 ```
@@ -25,37 +26,41 @@ private:
 #include <filesystem>
 
 std::ofstream Logger::logFile;
+std::string Logger::getCurrentDate() {
+    time_t now = time(0);
+    struct tm localTime;
+    localtime_s(&localTime, &now);
+    char date[9];
+    strftime(date, sizeof(date), "%Y%m%d", &localTime);
+    return date;
+}
 
 void Logger::log(const std::string& message) {
-    if (!logFile.is_open()) {
+    std::string currentDate = getCurrentDate();
+    if (!logFile.is_open() || getLogFilePath() != (std::string("./log/") + currentDate + "_log.txt")) {
+        if (logFile.is_open()) {
+            logFile.close();
+        }
         logFile.open(getLogFilePath(), std::ios::app);
     }
 
     time_t now = time(0);
     struct tm localTime;
     localtime_s(&localTime, &now);
-    char date[9];
-    strftime(date, sizeof(date), "%Y%m%d", &localTime);
-
     char time[7];
     strftime(time, sizeof(time), "%H%M%S", &localTime);
 
-    logFile << "[" << date << "_" << time << "] " << message << std::endl;
+    logFile << "[" << currentDate << "_" << time << "] " << message << std::endl;
 }
 
 std::string Logger::getLogFilePath() {
     std::string logDir = "./log"; // 同じ階層に "log" フォルダを作成する
     std::filesystem::create_directory(logDir);
 
-    time_t now = time(0);
-    struct tm localTime;
-    localtime_s(&localTime, &now);
-    char date[9];
-    strftime(date, sizeof(date), "%Y%m%d", &localTime);
-
-    std::string logFileName = logDir + "/log_" + date + ".txt";
+    std::string currentDate = getCurrentDate();
+    std::string logFileName = logDir + "/" + currentDate + "_log.txt";
     return logFileName;
 }
 ```
 
-これで、Loggerクラスを使用してログを出力する際に、日付ごとにファイルを分けてログを `./log` フォルダ内に保存することができます。ログファイル名は `log_YYYYMMDD.txt` 形式で管理されます。
+これでLoggerクラスを使用して、アプリケーション実行中に日付が変わった場合でも、適切にログを別ファイルに記録することができます。ログファイル名は `YYYYMMDD_log.txt` 形式で管理されます。ログファイルは `./log` フォルダに保存されます。
