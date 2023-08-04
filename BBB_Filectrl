@@ -1,0 +1,67 @@
+16進数変換
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <iomanip>
+#include <sstream>
+
+int main() {
+    std::ifstream file("example.bin", std::ios::binary); // バイナリモードでファイルを開く
+
+    if (file.is_open()) {
+        // ファイルのサイズを取得
+        file.seekg(0, std::ios::end);
+        std::streampos fileSize = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        // ファイルデータを読み取る
+        std::vector<uint8_t> buffer(fileSize);
+        file.read(reinterpret_cast<char*>(buffer.data()), fileSize);
+
+        file.close(); // ファイルを閉じる
+
+        // バイナリデータを16進数文字列に変換する
+        std::stringstream ss;
+        for (const uint8_t byte : buffer) {
+            ss << std::setfill('0') << std::setw(2) << std::hex << static_cast<int>(byte);
+        }
+        std::string hexString = ss.str();
+
+        // 16進数文字列を表示
+        std::cout << "16進数文字列: " << hexString << std::endl;
+    } else {
+        std::cerr << "ファイルを開けませんでした。" << std::endl;
+    }
+
+    return 0;
+}
+
+
+バイナリデータに戻す
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <string>
+#include <sstream>
+
+int main() {
+    std::string hexString = "48656C6C6F20576F726C64"; // 16進数文字列（例として "Hello World" の16進数表現）
+
+    // 16進数文字列をバイナリデータに戻す
+    std::vector<uint8_t> binaryData;
+    for (size_t i = 0; i < hexString.length(); i += 2) {
+        uint8_t byte;
+        std::istringstream ss(hexString.substr(i, 2));
+        ss >> std::hex >> byte;
+        binaryData.push_back(byte);
+    }
+
+    // バイナリデータをファイルに保存
+    std::ofstream file("restored.bin", std::ios::binary);
+    file.write(reinterpret_cast<const char*>(binaryData.data()), binaryData.size());
+    file.close();
+
+    std::cout << "バイナリデータをファイルに戻しました。" << std::endl;
+
+    return 0;
+}
