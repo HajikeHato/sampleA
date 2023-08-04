@@ -1,0 +1,61 @@
+もちろん、全文でLoggerクラスのヘッダファイルとソースファイルを提示します。
+
+**Logger.h**:
+
+```cpp
+#pragma once
+#include <string>
+#include <fstream>
+#include <ctime>
+
+class Logger {
+public:
+    static void log(const std::string& message);
+
+private:
+    static std::ofstream logFile;
+    static std::string getLogFilePath();
+};
+```
+
+**Logger.cpp**:
+
+```cpp
+#include "Logger.h"
+#include <filesystem>
+
+std::ofstream Logger::logFile;
+
+void Logger::log(const std::string& message) {
+    if (!logFile.is_open()) {
+        logFile.open(getLogFilePath(), std::ios::app);
+    }
+
+    time_t now = time(0);
+    struct tm localTime;
+    localtime_s(&localTime, &now);
+    char date[9];
+    strftime(date, sizeof(date), "%Y%m%d", &localTime);
+
+    char time[7];
+    strftime(time, sizeof(time), "%H%M%S", &localTime);
+
+    logFile << "[" << date << "_" << time << "] " << message << std::endl;
+}
+
+std::string Logger::getLogFilePath() {
+    std::string logDir = "./log"; // 同じ階層に "log" フォルダを作成する
+    std::filesystem::create_directory(logDir);
+
+    time_t now = time(0);
+    struct tm localTime;
+    localtime_s(&localTime, &now);
+    char date[9];
+    strftime(date, sizeof(date), "%Y%m%d", &localTime);
+
+    std::string logFileName = logDir + "/log_" + date + ".txt";
+    return logFileName;
+}
+```
+
+これで、Loggerクラスを使用してログを出力する際に、日付ごとにファイルを分けてログを `./log` フォルダ内に保存することができます。ログファイル名は `log_YYYYMMDD.txt` 形式で管理されます。
