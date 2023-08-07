@@ -1,0 +1,5 @@
+EVP_default_properties_is_fips_enabled(3):
+この関数は、現在のシステムでOpenSSLライブラリがFIPSモードで動作しているかどうかを確認するために使用されます。FIPSモードが有効である場合、関数は真（true）を返します。FIPSモードが無効またはサポートされていない場合は、偽（false）を返します。
+
+EVP_default_properties_enable_fips(3):
+この関数は、OpenSSLライブラリをFIPSモードで動作させるために使用されます。FIPSモードを有効にすることで、FIPSに準拠したセキュリティ基準に従った暗号アルゴリズムとセキュリティメカニズムが使用されます。
