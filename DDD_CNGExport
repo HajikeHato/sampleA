@@ -1,0 +1,43 @@
+#include <windows.h>
+#include <bcrypt.h>
+#include <openssl/ec.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+
+int main() {
+    // 初期化処理
+    BCRYPT_ALG_HANDLE hAlg;
+    BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_ECDSA_P256_ALGORITHM, NULL, 0);
+
+    // CNG から ECDSA 秘密鍵を取得
+    BCRYPT_KEY_HANDLE hCngKey;
+    BCryptOpenKeyHandle(hAlg, &hCngKey, L"ECDSA key", 0, BCRYPT_NO_KEY_VALIDATION);
+
+    // CNG 秘密鍵から OpenSSL の EC_KEY オブジェクトを作成
+    DWORD privKeyLength;
+    BCryptExportKey(hCngKey, NULL, BCRYPT_ECCPRIVATE_BLOB, NULL, 0, &privKeyLength, 0);
+    BYTE *privKeyBuffer = new BYTE[privKeyLength];
+    BCryptExportKey(hCngKey, NULL, BCRYPT_ECCPRIVATE_BLOB, privKeyBuffer, privKeyLength, &privKeyLength, 0);
+
+    // 秘密鍵情報を BIO に書き込む
+    BIO *bio = BIO_new_mem_buf(privKeyBuffer, privKeyLength);
+    EVP_PKEY *evp_key = EVP_PKEY_new();
+
+    // 秘密鍵を EVP_PKEY に変換
+    if (PEM_read_bio_ECPrivateKey(bio, &evp_key, NULL, NULL)) {
+        // 変換成功
+        // evp_key を使用して何かを行う
+    } else {
+        // 変換失敗
+        // エラーハンドリング
+    }
+
+    // 後処理
+    BIO_free(bio);
+    EVP_PKEY_free(evp_key);
+    BCryptDestroyKey(hCngKey);
+    BCryptCloseAlgorithmProvider(hAlg, 0);
+    delete[] privKeyBuffer;
+
+    return 0;
+}
