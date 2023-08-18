@@ -1,0 +1,141 @@
+C++のMFCを使用してECDSA秘密鍵をインポートするサンプルコードを提供いたします。以下のコード例は、Windows CNGライブラリを使用してECDSA秘密鍵を読み込み、MFCダイアログボックスを介して操作する方法を示しています。
+
+```cpp
+#include "stdafx.h"
+#include "YourProjectName.h"
+#include "YourProjectNameDlg.h"
+
+#ifdef _DEBUG
+#define new DEBUG_NEW
+#endif
+
+CYourProjectNameDlg::CYourProjectNameDlg(CWnd* pParent /*=NULL*/)
+    : CDialogEx(IDD_YOURPROJECTNAME_DIALOG, pParent)
+{
+    m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
+}
+
+void CYourProjectNameDlg::DoDataExchange(CDataExchange* pDX)
+{
+    CDialogEx::DoDataExchange(pDX);
+}
+
+BEGIN_MESSAGE_MAP(CYourProjectNameDlg, CDialogEx)
+    ON_WM_PAINT()
+    ON_WM_QUERYDRAGICON()
+    ON_BN_CLICKED(IDC_BUTTON_IMPORT, &CYourProjectNameDlg::OnBnClickedButtonImport)
+END_MESSAGE_MAP()
+
+BOOL CYourProjectNameDlg::OnInitDialog()
+{
+    CDialogEx::OnInitDialog();
+    SetIcon(m_hIcon, TRUE);
+    SetIcon(m_hIcon, FALSE);
+    return TRUE;
+}
+
+void CYourProjectNameDlg::OnPaint()
+{
+    if (IsIconic())
+    {
+        CPaintDC dc(this);
+        SendMessage(WM_ICONERASEBKGND, reinterpret_cast<WPARAM>(dc.GetSafeHdc()), 0);
+        int cxIcon = GetSystemMetrics(SM_CXICON);
+        int cyIcon = GetSystemMetrics(SM_CYICON);
+        CRect rect;
+        GetClientRect(&rect);
+        int x = (rect.Width() - cxIcon + 1) / 2;
+        int y = (rect.Height() - cyIcon + 1) / 2;
+        dc.DrawIcon(x, y, m_hIcon);
+    }
+    else
+    {
+        CDialogEx::OnPaint();
+    }
+}
+
+HCURSOR CYourProjectNameDlg::OnQueryDragIcon()
+{
+    return static_cast<HCURSOR>(m_hIcon);
+}
+
+void CYourProjectNameDlg::OnBnClickedButtonImport()
+{
+    // ダイアログを開いて.pemファイルを選択
+    CFileDialog fileDlg(TRUE, _T("pem"), _T(""), OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST, _T("PEM Files (*.pem)|*.pem|All Files (*.*)|*.*||"), this);
+    if (fileDlg.DoModal() == IDOK)
+    {
+        CString filePath = fileDlg.GetPathName();
+        ImportECDSAPrivateKey(filePath);
+    }
+}
+
+void CYourProjectNameDlg::ImportECDSAPrivateKey(const CString& filePath)
+{
+    try
+    {
+        CFile file(filePath, CFile::modeRead | CFile::typeBinary);
+        ULONGLONG fileSize = file.GetLength();
+        if (fileSize > 0)
+        {
+            BYTE* buffer = new BYTE[fileSize];
+            file.Read(buffer, static_cast<UINT>(fileSize));
+
+            CRYPT_DATA_BLOB privateKeyBlob;
+            privateKeyBlob.cbData = static_cast<DWORD>(fileSize);
+            privateKeyBlob.pbData = buffer;
+
+            DWORD flags = 0;  // 適切なフラグを設定
+            CRYPT_KEY_PROV_INFO keyProvInfo = {};  // 適切なキープロバイダ情報を設定
+
+            BOOL result = CryptImportKey(NULL, buffer, privateKeyBlob.cbData, NULL, flags, &m_hKey);
+            if (result)
+            {
+                AfxMessageBox(_T("秘密鍵をインポートしました。"));
+            }
+            else
+            {
+                DWORD error = GetLastError();
+                CString errorMessage;
+                errorMessage.Format(_T("エラー: %u"), error);
+                AfxMessageBox(errorMessage);
+            }
+
+            delete[] buffer;
+        }
+        else
+        {
+            AfxMessageBox(_T("ファイルサイズが0です。"));
+        }
+    }
+    catch (CException* e)
+    {
+        TCHAR errorMessage[256];
+        e->GetErrorMessage(errorMessage, 256);
+        AfxMessageBox(errorMessage);
+        e->Delete();
+    }
+}
+
+int main(int argc, char* argv[])
+{
+    CWinApp app;
+    CYourProjectNameDlg dlg;
+    m_pMainWnd = &dlg;
+    INT_PTR nResponse = dlg.DoModal();
+    if (nResponse == IDOK)
+    {
+        // OKがクリックされた場合の処理
+    }
+    else if (nResponse == IDCANCEL)
+    {
+        // キャンセルがクリックされた場合の処理
+    }
+
+    return 0;
+}
+```
+
+このサンプルコードでは、MFCのダイアログボックスアプリケーションを使用しています。ボタンがクリックされると、ファイルダイアログが開き、選択された.pemファイルから秘密鍵をインポートします。インポートする際には、適切なフラグやキープロバイダ情報を設定してください。
+
+ただし、これは基本的なフローのサンプルであり、実際のアプリケーションには適切なエラーハンドリングやセキュリティ対策を追加する必要があります。また、コード内の `m_hKey` や `keyProvInfo` の適切な宣言と解放も行う必要があります。
