@@ -1,0 +1,62 @@
+using System;
+using System.IO;
+using System.Security.Cryptography;
+
+namespace ECDSAPrivateKeyImport
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            string pemFilePath = "path/to/your/private_key.pem";  // .pem 秘密鍵ファイルへのパス
+
+            try
+            {
+                string pemContents = File.ReadAllText(pemFilePath);
+                string privateKey = ExtractPrivateKeyFromPEM(pemContents);
+
+                CngKeyCreationParameters keyCreationParameters = new CngKeyCreationParameters
+                {
+                    ExportPolicy = CngExportPolicies.AllowExport,
+                    KeyUsage = CngKeyUsages.AllUsages,
+                    KeyCreationOptions = CngKeyCreationOptions.None
+                };
+
+                // ECDSA 鍵の曲線パラメータを設定
+                CngAlgorithm curve = CngAlgorithm.ECDsaP256;  // 曲線を適宜設定
+                keyCreationParameters.Parameters.Add(new CngProperty("ECDSAParameters", Convert.FromBase64String(privateKey), CngPropertyOptions.None));
+
+                using (CngKey cngKey = CngKey.Create(curve, "YourKeyName", keyCreationParameters))
+                {
+                    using (ECDsaCng ecdsaCng = new ECDsaCng(cngKey))
+                    {
+                        // CNG にインポートされた秘密鍵を使用して何かを行う
+                        // 例: ecdsaCng.SignData(...), ecdsaCng.SignHash(...), ecdsaCng.ECDiffieHellmanKeyDerivation(...)
+                    }
+
+                    Console.WriteLine("秘密鍵をCNGにインポートしました。");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("エラー: " + ex.Message);
+            }
+        }
+
+        static string ExtractPrivateKeyFromPEM(string pemContents)
+        {
+            const string beginMarker = "-----BEGIN PRIVATE KEY-----";
+            const string endMarker = "-----END PRIVATE KEY-----";
+
+            int startIndex = pemContents.IndexOf(beginMarker) + beginMarker.Length;
+            int endIndex = pemContents.IndexOf(endMarker, startIndex);
+            string base64PrivateKey = pemContents.Substring(startIndex, endIndex - startIndex).Replace("\n", "").Replace("\r", "");
+
+            return base64PrivateKey;
+        }
+    }
+}
+
+
+
+
