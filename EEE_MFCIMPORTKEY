@@ -1,4 +1,4 @@
-申し訳ありません、前回のコードにおいて`hKey`と`hAlgorithm`の変数が定義されていなかったようです。これらの変数はCNG操作のために必要です。以下に修正されたコードを示します。
+申し訳ありません、BCryptCreatePersistedKey関数はCNG APIに存在しないため、前の回答に誤りが含まれていました。正しい方法は、キーコンテナを作成する前に秘密鍵をインポートすることです。以下に修正されたコードを示します。
 
 ```cpp
 #include <iostream>
@@ -38,17 +38,17 @@ int main() {
         return 1;
     }
 
-    // キーコンテナを作成
-    if (FAILED(BCryptCreatePersistedKey(hAlgorithm, &hKey, BCRYPT_ECDSA_PRIVATE_P256_MAGIC, keyContainerName, 0, 0))) {
-        std::wcerr << L"キーコンテナの作成に失敗しました。" << std::endl;
+    // 秘密鍵をインポート
+    if (FAILED(BCryptImportKeyPair(hAlgorithm, NULL, BCRYPT_PRIVATE_KEY_BLOB, &hKey, keyData, keyFileSize, 0))) {
+        std::wcerr << L"秘密鍵のインポートに失敗しました。" << std::endl;
         BCryptCloseAlgorithmProvider(hAlgorithm, 0);
         return 1;
     }
 
-    // 秘密鍵をキーコンテナにインポート
-    if (FAILED(BCryptImportKeyPair(hAlgorithm, NULL, BCRYPT_PRIVATE_KEY_BLOB, &hKey, keyData, keyFileSize, 0))) {
-        std::wcerr << L"秘密鍵のインポートに失敗しました。" << std::endl;
-        BCryptDeleteKey(hKey, 0);
+    // キーコンテナ名を設定
+    if (FAILED(BCryptSetProperty(hKey, BCRYPT_CONTAINER_NAME_PROPERTY, (PBYTE)keyContainerName, (ULONG)(wcslen(keyContainerName) + 1) * sizeof(wchar_t), 0))) {
+        std::wcerr << L"キーコンテナ名の設定に失敗しました。" << std::endl;
+        BCryptDestroyKey(hKey);
         BCryptCloseAlgorithmProvider(hAlgorithm, 0);
         return 1;
     }
@@ -56,11 +56,11 @@ int main() {
     std::wcout << L"秘密鍵がキーコンテナに格納されました。" << std::endl;
 
     // リソースを解放
-    BCryptCloseAlgorithmProvider(hAlgorithm, 0);
     BCryptDestroyKey(hKey);
+    BCryptCloseAlgorithmProvider(hAlgorithm, 0);
     delete[] keyData;
     return 0;
 }
 ```
 
-この修正を行うことで、`hAlgorithm`と`hKey`が正しく定義され、コードが正しく動作するはずです。
+この修正により、秘密鍵をインポートしてからキーコンテナの名前を設定することができます。再度、お手数をおかけしました。
