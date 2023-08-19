@@ -1,49 +1,71 @@
-キーコンテナ名を指定するには、`CryptAcquireContext` 関数の `pszContainer` パラメータを使用します。以下は、キーコンテナ名を指定してECDSA秘密鍵をインポートするC++コードの例です：
+理解しました。OpenSSLのPEM形式の秘密鍵ファイルをCNGにインポートするサンプルコードは以下のようになります。このコードはPEM形式の秘密鍵ファイルから秘密鍵を読み取り、CNGキーコンテナに格納します。
 
 ```cpp
-#include <iostream>
 #include <windows.h>
-#include <wincrypt.h>
+#include <bcrypt.h>
+#include <stdio.h>
+
+#pragma comment(lib, "bcrypt.lib")
+
+// OpenSSL PEM形式の秘密鍵ファイルから秘密鍵を読み込む関数
+bool LoadPrivateKeyFromPEMFile(const char* pemFileName, UCHAR** keyData, DWORD* keyDataLength) {
+    FILE* pemFile = fopen(pemFileName, "rb");
+    if (!pemFile) {
+        return false;
+    }
+
+    // ファイルからデータを読み込む（適切なエラーチェックは省略）
+    fseek(pemFile, 0, SEEK_END);
+    long fileSize = ftell(pemFile);
+    fseek(pemFile, 0, SEEK_SET);
+
+    *keyData = (UCHAR*)malloc(fileSize);
+    fread(*keyData, 1, fileSize, pemFile);
+    *keyDataLength = (DWORD)fileSize;
+
+    fclose(pemFile);
+    return true;
+}
 
 int main() {
-    // パスワードで保護されたPEMファイルのパス
-    LPCWSTR pemFilePath = L"your_key.pem";
-    // パスワード
-    LPCWSTR password = L"your_password";
+    // CNG関連の変数とハンドルを宣言します。
+    BCRYPT_ALG_HANDLE hAlg = NULL;
+    BCRYPT_KEY_HANDLE hKey = NULL;
+    NTSTATUS status;
 
-    // ECDSAプロバイダー名
-    LPCWSTR providerName = MS_KEY_STORAGE_PROVIDER;
-
-    // キーコンテナ名
-    LPCWSTR containerName = L"MyECDSAKeyContainer"; // ここでキーコンテナ名を指定
-
-    // 鍵ストアを開く
-    HCRYPTPROV hProvider = NULL;
-    if (!CryptAcquireContext(&hProvider, containerName, providerName, PROV_EC_ECDSA_FULL, CRYPT_VERIFYCONTEXT)) {
-        std::cerr << "Failed to acquire CNG context." << std::endl;
+    // CNGアルゴリズムを開きます。ここではECDSA_P256を使用します。
+    status = BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_ECDSA_P256_ALGORITHM, NULL, 0);
+    if (status != STATUS_SUCCESS) {
+        // エラーハンドリング
         return 1;
     }
 
-    // PEMファイルからECDSA秘密鍵を読み込む
-    HCRYPTKEY hKey = NULL;
-    if (!CryptImportPKCS8(hProvider, pemFilePath, password, NULL, &hKey)) {
-        std::cerr << "Failed to import ECDSA private key from PEM file." << std::endl;
-        CryptReleaseContext(hProvider, 0);
+    UCHAR* keyData;
+    DWORD keyDataLength;
+
+    // PEM形式の秘密鍵ファイルから秘密鍵を読み込みます。
+    if (!LoadPrivateKeyFromPEMFile("your_key_file.pem", &keyData, &keyDataLength)) {
+        // ファイル読み込みエラー
+        BCryptCloseAlgorithmProvider(hAlg, 0);
         return 1;
     }
 
-    // ECDSA秘密鍵を使って何かを行うことができます
+    // 秘密鍵をキーコンテナに格納します。
+    status = BCryptImportKeyPair(hAlg, NULL, BCRYPT_PRIVATE_KEY_BLOB, &hKey, keyData, keyDataLength, 0);
+    if (status != STATUS_SUCCESS) {
+        // エラーハンドリング
+        free(keyData);
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+        return 1;
+    }
 
-    // 秘密鍵を解放する
-    CryptDestroyKey(hKey);
-
-    // コンテキストを解放する
-    CryptReleaseContext(hProvider, 0);
-
-    std::cout << "ECDSA秘密鍵を正常にインポートし、キーコンテナに保存しました。" << std::endl;
+    // クリーンアップ
+    free(keyData);
+    BCryptDestroyKey(hKey);
+    BCryptCloseAlgorithmProvider(hAlg, 0);
 
     return 0;
 }
 ```
 
-このコードでは、`containerName` 変数にキーコンテナ名を指定し、それを `CryptAcquireContext` 関数に渡してキーコンテナを指定しています。キーコンテナ名は必要に応じて変更してください。
+このコードは、OpenSSL PEM形式の秘密鍵ファイルから秘密鍵データを読み取り、CNGキーコンテナにインポートする方法を示しています。必要に応じてエラーハンドリングやファイルの存在確認を強化することができます。
