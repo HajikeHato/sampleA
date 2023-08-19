@@ -1,0 +1,51 @@
+申し訳ありません、前回のコード例はCNGを使用しているのではなく、従来のCryptoAPI（Cryptography API: Next Generationの前身）を使用しています。ECDSAキーの操作にはCNGを使用するべきです。
+
+MFCを使った場合でもCNGを使用することができます。以下はMFCを使用してCNGを使ったECDSA鍵のインポートの例です：
+
+```cpp
+#include <afx.h>
+#include <afxwin.h>
+#include <bcrypt.h>
+
+int main() {
+    // アプリケーションの初期化
+    AfxWinInit(::GetModuleHandle(NULL), NULL, ::GetCommandLine(), 0);
+
+    // パスワードで保護されたPEMファイルのパス
+    CString pemFilePath = L"your_key.pem";
+    // パスワード
+    CString password = L"your_password";
+
+    // BCRYPTプロバイダー名
+    LPCWSTR providerName = BCRYPT_ECDSA_ALGORITHM;
+
+    // アルゴリズム ハンドル
+    BCRYPT_ALG_HANDLE hAlgorithm;
+    if (BCryptOpenAlgorithmProvider(&hAlgorithm, providerName, NULL, 0) != 0) {
+        AfxMessageBox(L"Failed to open ECDSA algorithm provider.");
+        return 1;
+    }
+
+    // PEMファイルから鍵を読み込む
+    BCRYPT_KEY_HANDLE hKey;
+    if (BCryptImportKeyPair(hAlgorithm, NULL, BCRYPT_PRIVATE_KEY_BLOB, &hKey, reinterpret_cast<BYTE*>(pemFilePath.GetBuffer()), pemFilePath.GetLength() * sizeof(WCHAR), 0) != 0) {
+        AfxMessageBox(L"Failed to import ECDSA key from PEM file.");
+        BCryptCloseAlgorithmProvider(hAlgorithm, 0);
+        return 1;
+    }
+
+    // 鍵を使って何かを行うことができます
+
+    // 鍵を解放する
+    BCryptDestroyKey(hKey);
+
+    // アルゴリズム ハンドルを閉じる
+    BCryptCloseAlgorithmProvider(hAlgorithm, 0);
+
+    AfxMessageBox(L"ECDSA鍵を正常にインポートしました.");
+
+    return 0;
+}
+```
+
+このコードは、MFCを使用してBCrypt APIを介してCNGを操作してECDSA鍵をインポートする方法を示しています。BCrypt APIはCNGを操作するためのAPIです。
