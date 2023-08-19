@@ -1,4 +1,4 @@
-C++のMFCを使用してECDSA秘密鍵ファイルから秘密鍵を読み込み、キーコンテナに格納するには、CNG（Cryptography Next Generation）を使用することができます。以下は、その手順のサンプルコードと解説です。
+申し訳ありません、前回のコードにおいて`hKey`と`hAlgorithm`の変数が定義されていなかったようです。これらの変数はCNG操作のために必要です。以下に修正されたコードを示します。
 
 ```cpp
 #include <iostream>
@@ -29,6 +29,9 @@ int main() {
     fread(keyData, 1, keyFileSize, keyFile);
     fclose(keyFile);
 
+    BCRYPT_ALG_HANDLE hAlgorithm = NULL;
+    BCRYPT_KEY_HANDLE hKey = NULL;
+
     // CNGを初期化
     if (FAILED(BCryptOpenAlgorithmProvider(&hAlgorithm, BCRYPT_ECDSA_P256_ALGORITHM, NULL, 0))) {
         std::wcerr << L"CNGの初期化に失敗しました。" << std::endl;
@@ -54,14 +57,10 @@ int main() {
 
     // リソースを解放
     BCryptCloseAlgorithmProvider(hAlgorithm, 0);
+    BCryptDestroyKey(hKey);
     delete[] keyData;
     return 0;
 }
 ```
 
-このコードでは、まずECDSA秘密鍵をファイルから読み込み、次にCNGを初期化します。その後、指定した名前でキーコンテナを作成し、秘密鍵をインポートします。最後に、必要なリソースを解放します。
-
-注意事項:
-1. キーコンテナ名は一意である必要があります。既存のキーコンテナと重複しないようにしてください。
-2. 必要に応じてエラーハンドリングを強化し、エラーが発生した場合に適切に処理してください。
-3. BCRYPT_ECDSA_P256_ALGORITHMに対応するアルゴリズムを使用していることを確認してください。必要に応じて他のアルゴリズムに変更できます。
+この修正を行うことで、`hAlgorithm`と`hKey`が正しく定義され、コードが正しく動作するはずです。
