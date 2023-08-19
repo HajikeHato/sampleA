@@ -1,9 +1,10 @@
-申し訳ありません、BCryptCreatePersistedKey関数はCNG APIに存在しないため、前の回答に誤りが含まれていました。正しい方法は、キーコンテナを作成する前に秘密鍵をインポートすることです。以下に修正されたコードを示します。
+はい、ファイルを読み込むために `ifstream` を使用することは一般的に安全であり、C++の標準的な方法です。以下は、`ifstream` を使用した修正されたコードです。
 
 ```cpp
 #include <iostream>
 #include <windows.h>
 #include <bcrypt.h>
+#include <fstream>
 
 #pragma comment(lib, "bcrypt.lib")
 
@@ -14,20 +15,19 @@ int main() {
     // キーコンテナの名前
     const wchar_t* keyContainerName = L"MyECDSAPrivateKey";
 
-    // ファイルから秘密鍵を読み込む
-    FILE* keyFile = _wfopen(keyFilePath, L"rb");
-    if (!keyFile) {
+    std::ifstream keyFile(keyFilePath, std::ios::binary);
+    if (!keyFile.is_open()) {
         std::wcerr << L"ファイルを開けませんでした。" << std::endl;
         return 1;
     }
 
-    fseek(keyFile, 0, SEEK_END);
-    long keyFileSize = ftell(keyFile);
-    fseek(keyFile, 0, SEEK_SET);
+    keyFile.seekg(0, std::ios::end);
+    long keyFileSize = static_cast<long>(keyFile.tellg());
+    keyFile.seekg(0, std::ios::beg);
 
     BYTE* keyData = new BYTE[keyFileSize];
-    fread(keyData, 1, keyFileSize, keyFile);
-    fclose(keyFile);
+    keyFile.read(reinterpret_cast<char*>(keyData), keyFileSize);
+    keyFile.close();
 
     BCRYPT_ALG_HANDLE hAlgorithm = NULL;
     BCRYPT_KEY_HANDLE hKey = NULL;
@@ -63,4 +63,4 @@ int main() {
 }
 ```
 
-この修正により、秘密鍵をインポートしてからキーコンテナの名前を設定することができます。再度、お手数をおかけしました。
+この修正により、ファイルの読み込みに `ifstream` を使用し、C++標準の方法に合わせています。
