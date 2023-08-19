@@ -1,33 +1,67 @@
-はい、ファイルを読み込むために `ifstream` を使用することは一般的に安全であり、C++の標準的な方法です。以下は、`ifstream` を使用した修正されたコードです。
+OpenSSLライブラリを使用してPEM形式の秘密鍵ファイルをバイナリ形式に変換し、それをCNGに渡すためのサンプルコードは以下の通りです。このコードはC++で書かれており、OpenSSLのライブラリがインストールされていることを前提としています。
 
 ```cpp
 #include <iostream>
 #include <windows.h>
 #include <bcrypt.h>
 #include <fstream>
+#include <vector>
+#include <openssl/pem.h>
+#include <openssl/ec.h>
 
 #pragma comment(lib, "bcrypt.lib")
+#pragma comment(lib, "libcrypto.lib")
 
-int main() {
-    // ECDSA秘密鍵を含むファイルのパス
-    const wchar_t* keyFilePath = L"C:\\path\\to\\your\\private_key.pem";
-
-    // キーコンテナの名前
-    const wchar_t* keyContainerName = L"MyECDSAPrivateKey";
-
-    std::ifstream keyFile(keyFilePath, std::ios::binary);
-    if (!keyFile.is_open()) {
-        std::wcerr << L"ファイルを開けませんでした。" << std::endl;
-        return 1;
+// PEM形式の秘密鍵ファイルをバイナリ形式に変換
+bool ConvertPEMtoBinary(const std::wstring& pemFilePath, std::vector<BYTE>& binaryData) {
+    FILE* pemFile = _wfopen(pemFilePath.c_str(), L"rb");
+    if (!pemFile) {
+        std::wcerr << L"PEMファイルを開けませんでした。" << std::endl;
+        return false;
     }
 
-    keyFile.seekg(0, std::ios::end);
-    long keyFileSize = static_cast<long>(keyFile.tellg());
-    keyFile.seekg(0, std::ios::beg);
+    EVP_PKEY* pkey = PEM_read_PrivateKey(pemFile, NULL, NULL, NULL);
+    fclose(pemFile);
 
-    BYTE* keyData = new BYTE[keyFileSize];
-    keyFile.read(reinterpret_cast<char*>(keyData), keyFileSize);
-    keyFile.close();
+    if (!pkey) {
+        std::wcerr << L"PEMファイルから秘密鍵を読み取れませんでした。" << std::endl;
+        return false;
+    }
+
+    EC_KEY* ec_key = EVP_PKEY_get1_EC_KEY(pkey);
+    if (!ec_key) {
+        std::wcerr << L"ECキーを取得できませんでした。" << std::endl;
+        EVP_PKEY_free(pkey);
+        return false;
+    }
+
+    const EC_GROUP* ec_group = EC_KEY_get0_group(ec_key);
+    const BIGNUM* private_key = EC_KEY_get0_private_key(ec_key);
+
+    int private_key_size = BN_num_bytes(private_key);
+    if (private_key_size <= 0) {
+        std::wcerr << L"秘密鍵のバイト数が無効です。" << std::endl;
+        EC_KEY_free(ec_key);
+        EVP_PKEY_free(pkey);
+        return false;
+    }
+
+    binaryData.resize(private_key_size);
+    BN_bn2bin(private_key, binaryData.data());
+
+    EC_KEY_free(ec_key);
+    EVP_PKEY_free(pkey);
+    return true;
+}
+
+int main() {
+    // PEM形式の秘密鍵ファイルのパス
+    const std::wstring pemFilePath = L"C:\\path\\to\\your\\private_key.pem";
+
+    std::vector<BYTE> binaryPrivateKey;
+    if (!ConvertPEMtoBinary(pemFilePath, binaryPrivateKey)) {
+        return 1;
+    }
 
     BCRYPT_ALG_HANDLE hAlgorithm = NULL;
     BCRYPT_KEY_HANDLE hKey = NULL;
@@ -39,28 +73,19 @@ int main() {
     }
 
     // 秘密鍵をインポート
-    if (FAILED(BCryptImportKeyPair(hAlgorithm, NULL, BCRYPT_PRIVATE_KEY_BLOB, &hKey, keyData, keyFileSize, 0))) {
+    if (FAILED(BCryptImportKeyPair(hAlgorithm, NULL, BCRYPT_PRIVATE_KEY_BLOB, &hKey, binaryPrivateKey.data(), static_cast<ULONG>(binaryPrivateKey.size()), 0))) {
         std::wcerr << L"秘密鍵のインポートに失敗しました。" << std::endl;
         BCryptCloseAlgorithmProvider(hAlgorithm, 0);
         return 1;
     }
 
-    // キーコンテナ名を設定
-    if (FAILED(BCryptSetProperty(hKey, BCRYPT_CONTAINER_NAME_PROPERTY, (PBYTE)keyContainerName, (ULONG)(wcslen(keyContainerName) + 1) * sizeof(wchar_t), 0))) {
-        std::wcerr << L"キーコンテナ名の設定に失敗しました。" << std::endl;
-        BCryptDestroyKey(hKey);
-        BCryptCloseAlgorithmProvider(hAlgorithm, 0);
-        return 1;
-    }
-
-    std::wcout << L"秘密鍵がキーコンテナに格納されました。" << std::endl;
+    std::wcout << L"秘密鍵がインポートされました。" << std::endl;
 
     // リソースを解放
     BCryptDestroyKey(hKey);
     BCryptCloseAlgorithmProvider(hAlgorithm, 0);
-    delete[] keyData;
     return 0;
 }
 ```
 
-この修正により、ファイルの読み込みに `ifstream` を使用し、C++標準の方法に合わせています。
+このコードでは、OpenSSLを使用してPEM形式の秘密鍵ファイルをバイナリ形式に変換する関数 `ConvertPEMtoBinary` を追加しました。そして、バイナリ形式の秘密鍵をCNGにインポートしています。ライブラリやヘッダーファイルのパスに注意し、必要なライブラリをリンクしてください。また、エラーハンドリングを適切に実装してセキュリティに注意を払うことをお勧めします。
