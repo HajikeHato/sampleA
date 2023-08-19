@@ -1,6 +1,4 @@
-申し訳ありません、前回の回答に誤りがありました。ECDSA秘密鍵をインポートする場合、`PROV_RSA_AES` プロバイダータイプを使用するのは正しくありません。ECDSA秘密鍵をインポートするには、`PROV_EC_ECDSA_FULL` プロバイダータイプを使用する必要があります。
-
-以下は、正しい方法でECDSA秘密鍵をインポートするC++コードです：
+キーコンテナ名を指定するには、`CryptAcquireContext` 関数の `pszContainer` パラメータを使用します。以下は、キーコンテナ名を指定してECDSA秘密鍵をインポートするC++コードの例です：
 
 ```cpp
 #include <iostream>
@@ -16,9 +14,12 @@ int main() {
     // ECDSAプロバイダー名
     LPCWSTR providerName = MS_KEY_STORAGE_PROVIDER;
 
+    // キーコンテナ名
+    LPCWSTR containerName = L"MyECDSAKeyContainer"; // ここでキーコンテナ名を指定
+
     // 鍵ストアを開く
     HCRYPTPROV hProvider = NULL;
-    if (!CryptAcquireContext(&hProvider, NULL, providerName, PROV_EC_ECDSA_FULL, CRYPT_VERIFYCONTEXT)) {
+    if (!CryptAcquireContext(&hProvider, containerName, providerName, PROV_EC_ECDSA_FULL, CRYPT_VERIFYCONTEXT)) {
         std::cerr << "Failed to acquire CNG context." << std::endl;
         return 1;
     }
@@ -39,10 +40,10 @@ int main() {
     // コンテキストを解放する
     CryptReleaseContext(hProvider, 0);
 
-    std::cout << "ECDSA秘密鍵を正常にインポートしました。" << std::endl;
+    std::cout << "ECDSA秘密鍵を正常にインポートし、キーコンテナに保存しました。" << std::endl;
 
     return 0;
 }
 ```
 
-この修正されたコードでは、`PROV_EC_ECDSA_FULL` プロバイダータイプを使用してECDSA秘密鍵をインポートする正しい方法を示しています。お詫び申し上げます。
+このコードでは、`containerName` 変数にキーコンテナ名を指定し、それを `CryptAcquireContext` 関数に渡してキーコンテナを指定しています。キーコンテナ名は必要に応じて変更してください。
