@@ -1,0 +1,100 @@
+#include <iostream>
+#include <vector>
+#include <openssl/pem.h>
+#include <openssl/ec.h>
+#include <openssl/evp.h>
+#include <windows.h>
+#include <bcrypt.h>
+#include <ncrypt.h>
+
+#pragma comment(lib, "bcrypt.lib")
+#pragma comment(lib, "ncrypt.lib")
+
+bool ImportPEMPrivateKeyToNamedKeyContainer(const std::string& pemFile, const std::wstring& keyContainerName) {
+    std::ifstream file(pemFile, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open PEM file: " << pemFile << std::endl;
+        return false;
+    }
+
+    EVP_PKEY* pkey = PEM_read_PrivateKey(file, NULL, NULL, NULL);
+    file.close();
+
+    if (!pkey) {
+        std::cerr << "Failed to read PEM private key" << std::endl;
+        return false;
+    }
+
+    EC_KEY* ecKey = EVP_PKEY_get1_EC_KEY(pkey);
+
+    if (!ecKey) {
+        std::cerr << "Failed to get EC key from PEM private key" << std::endl;
+        EVP_PKEY_free(pkey);
+        return false;
+    }
+
+    // ECキーから秘密鍵と公開鍵を取得
+    const BIGNUM* privateKey = EC_KEY_get0_private_key(ecKey);
+    const EC_POINT* publicKey = EC_KEY_get0_public_key(ecKey);
+
+    // BCRYPT_ECCKEY_BLOB構造体に変換
+    BCRYPT_ECCKEY_BLOB ecKeyBlob;
+    ecKeyBlob.dwMagic = BCRYPT_ECDSA_PRIVATE_P521_MAGIC;
+    ecKeyBlob.cbKey = 66; // 521ビットの鍵の場合
+    ecKeyBlob.X = (PUCHAR)BN_bn2hex(privateKey);
+    ecKeyBlob.Y = (PUCHAR)BN_bn2hex(privateKey) + ecKeyBlob.cbKey / 2;
+
+    // キーコンテナを作成またはオープンする
+    NCRYPT_PROV_HANDLE hProvider = NULL;
+    if (NCryptOpenStorageProvider(&hProvider, NULL, 0) != 0) {
+        std::cerr << "NCryptOpenStorageProvider failed" << std::endl;
+        free(ecKeyBlob.X);
+        EVP_PKEY_free(pkey);
+        EC_KEY_free(ecKey);
+        return false;
+    }
+
+    NCRYPT_KEY_HANDLE hKey = NULL;
+    if (NCryptCreatePersistedKey(hProvider, &hKey, BCRYPT_ECCP521_ALGORITHM, keyContainerName.c_str(), 0, 0) != 0) {
+        std::cerr << "NCryptCreatePersistedKey failed" << std::endl;
+        NCryptFreeObject(hProvider);
+        free(ecKeyBlob.X);
+        EVP_PKEY_free(pkey);
+        EC_KEY_free(ecKey);
+        return false;
+    }
+
+    // 秘密鍵をCNGにインポート
+    if (NCryptImportKey(hKey, NULL, BCRYPT_ECCPRIVATE_BLOB, NULL, NULL, (PUCHAR)&ecKeyBlob, sizeof(ecKeyBlob), 0) != 0) {
+        std::cerr << "NCryptImportKey failed" << std::endl;
+        NCryptFreeObject(hKey);
+        NCryptFreeObject(hProvider);
+        free(ecKeyBlob.X);
+        EVP_PKEY_free(pkey);
+        EC_KEY_free(ecKey);
+        return false;
+    }
+
+    std::cout << "Private key imported to named key container successfully" << std::endl;
+
+    NCryptFreeObject(hKey);
+    NCryptFreeObject(hProvider);
+    free(ecKeyBlob.X);
+    EVP_PKEY_free(pkey);
+    EC_KEY_free(ecKey);
+
+    return true;
+}
+
+int main() {
+    std::string pemFile = "your_private_key.pem"; // 秘密鍵ファイルのパスを指定してください
+    std::wstring keyContainerName = L"MyKeyContainer"; // 任意のキーコンテナ名
+
+    if (ImportPEMPrivateKeyToNamedKeyContainer(pemFile, keyContainerName)) {
+        std::cout << "Private key import successful!" << std::endl;
+    } else {
+        std::cerr << "Private key import failed." << std::endl;
+    }
+
+    return 0;
+}
