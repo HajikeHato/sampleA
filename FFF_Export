@@ -1,0 +1,102 @@
+#include <iostream>
+#include <openssl/pem.h>
+#include <openssl/ec.h>
+#include <openssl/evp.h>
+#include <openssl/bio.h>
+#include <windows.h>
+#include <ncrypt.h>
+
+#pragma comment(lib, "ncrypt.lib")
+
+bool ExportPrivateKeyFromKeyContainer(const std::wstring& keyContainerName, std::vector<uint8_t>& privateKeyBlob) {
+    NCRYPT_PROV_HANDLE hProvider = NULL;
+    NCRYPT_KEY_HANDLE hKey = NULL;
+
+    // キーコンテナをオープンする
+    if (NCryptOpenStorageProvider(&hProvider, NULL, 0) != 0) {
+        std::cerr << "NCryptOpenStorageProvider failed" << std::endl;
+        return false;
+    }
+
+    if (NCryptOpenKey(hProvider, &hKey, keyContainerName.c_str(), 0, 0) != 0) {
+        std::cerr << "NCryptOpenKey failed" << std::endl;
+        NCryptFreeObject(hProvider);
+        return false;
+    }
+
+    // 秘密鍵をエクスポート
+    DWORD exportPolicy = NCRYPT_ALLOW_EXPORT_FLAG;
+    if (NCryptExportKey(hKey, NULL, BCRYPT_ECCPRIVATE_BLOB, &exportPolicy, NULL, 0, NULL, 0, &privateKeyBlob[0], static_cast<DWORD>(privateKeyBlob.size()), 0) != 0) {
+        std::cerr << "NCryptExportKey failed" << std::endl;
+        NCryptFreeObject(hKey);
+        NCryptFreeObject(hProvider);
+        return false;
+    }
+
+    // キーをクローズ
+    NCryptFreeObject(hKey);
+
+    // プロバイダをクローズ
+    NCryptFreeObject(hProvider);
+
+    return true;
+}
+
+EVP_PKEY* ConvertToEVP_PKEY(const std::vector<uint8_t>& privateKeyBlob) {
+    EVP_PKEY* pkey = NULL;
+
+    // BIOを作成し、秘密鍵バイナリデータを読み取る
+    BIO* bio = BIO_new_mem_buf(privateKeyBlob.data(), static_cast<int>(privateKeyBlob.size()));
+    if (!bio) {
+        std::cerr << "BIO_new_mem_buf failed" << std::endl;
+        return NULL;
+    }
+
+    // PEM形式の秘密鍵を読み込む
+    EC_KEY* ecKey = PEM_read_bio_ECPrivateKey(bio, NULL, NULL, NULL);
+    if (!ecKey) {
+        std::cerr << "PEM_read_bio_ECPrivateKey failed" << std::endl;
+        BIO_free(bio);
+        return NULL;
+    }
+
+    // EVP_PKEYに変換
+    pkey = EVP_PKEY_new();
+    if (pkey) {
+        if (EVP_PKEY_set1_EC_KEY(pkey, ecKey) != 1) {
+            std::cerr << "EVP_PKEY_set1_EC_KEY failed" << std::endl;
+            EVP_PKEY_free(pkey);
+            EC_KEY_free(ecKey);
+            BIO_free(bio);
+            return NULL;
+        }
+    }
+
+    EC_KEY_free(ecKey);
+    BIO_free(bio);
+
+    return pkey;
+}
+
+int main() {
+    std::wstring keyContainerName = L"MyKeyContainer"; // 対象のキーコンテナ名
+    std::vector<uint8_t> privateKeyBlob(1024); // エクスポートされた秘密鍵の格納用バッファ
+
+    if (ExportPrivateKeyFromKeyContainer(keyContainerName, privateKeyBlob)) {
+        std::cout << "Private key export successful!" << std::endl;
+
+        // 秘密鍵をEVP_PKEYに変換
+        EVP_PKEY* pkey = ConvertToEVP_PKEY(privateKeyBlob);
+        if (pkey) {
+            std::cout << "Private key converted to EVP_PKEY successfully!" << std::endl;
+
+            // ここでpkeyを使用して必要な操作を行います。
+
+            EVP_PKEY_free(pkey);
+        }
+    } else {
+        std::cerr << "Private key export failed." << std::endl;
+    }
+
+    return 0;
+}
