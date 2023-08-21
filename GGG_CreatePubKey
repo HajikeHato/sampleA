@@ -1,0 +1,64 @@
+#include <iostream>
+#include <openssl/ec.h>
+#include <openssl/ecdsa.h>
+#include <openssl/obj_mac.h>
+#include <openssl/bn.h>
+
+// ECDSA秘密鍵から公開鍵を導出する関数
+EC_POINT* DerivePublicKeyFromPrivateKey(const EC_KEY* eckey)
+{
+    const EC_GROUP* group = EC_KEY_get0_group(eckey);
+    const BIGNUM* private_key = EC_KEY_get0_private_key(eckey);
+
+    EC_POINT* pub_key = EC_POINT_new(group);
+    if (pub_key != nullptr)
+    {
+        if (EC_POINT_mul(group, pub_key, private_key, nullptr, nullptr, nullptr) == 1)
+        {
+            return pub_key;
+        }
+        EC_POINT_free(pub_key);
+    }
+
+    return nullptr;
+}
+
+int main()
+{
+    OpenSSL_add_all_algorithms();
+
+    // EC_KEYの生成（秘密鍵を含む）
+    EC_KEY* eckey = EC_KEY_new_by_curve_name(NID_secp521r1);
+    if (eckey == nullptr)
+    {
+        std::cerr << "EC_KEYの生成に失敗しました。" << std::endl;
+        return 1;
+    }
+
+    if (EC_KEY_generate_key(eckey) != 1)
+    {
+        std::cerr << "秘密鍵の生成に失敗しました。" << std::endl;
+        EC_KEY_free(eckey);
+        return 1;
+    }
+
+    // 秘密鍵から公開鍵を導出
+    EC_POINT* pub_key = DerivePublicKeyFromPrivateKey(eckey);
+    if (pub_key != nullptr)
+    {
+        // 公開鍵の使用
+        // ここでpub_keyを使用した操作を行います
+
+        // メモリの解放
+        EC_POINT_free(pub_key);
+    }
+    else
+    {
+        std::cerr << "公開鍵の導出に失敗しました。" << std::endl;
+    }
+
+    // EC_KEYの解放
+    EC_KEY_free(eckey);
+
+    return 0;
+}
