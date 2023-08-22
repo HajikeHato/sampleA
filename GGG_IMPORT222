@@ -1,0 +1,90 @@
+ECDSA鍵を使う場合、`CryptAcquireContext` 関数の `PROV_RSA_AES` は適切ではありません。ECDSA鍵を扱うためには、`PROV_EC_ECDSA_SIG` プロバイダまたは `PROV_EC_SHA256` プロバイダを使用する必要があります。
+
+以下は、ECDSA鍵を使うために `CryptAcquireContext` を修正したサンプルコードです。
+
+```cpp
+#include <iostream>
+#include <openssl/ec.h>
+#include <openssl/pem.h>
+#include <openssl/err.h>
+#include <windows.h>
+#include <wincrypt.h>
+
+int main() {
+    // 秘密鍵ファイルのパス
+    const char* privateKeyFile = "private_key.pem";
+    
+    // キーコンテナ名
+    LPCWSTR keyContainerName = L"MyKeyContainer";
+
+    // OpenSSL 初期化
+    OpenSSL_add_all_algorithms();
+    ERR_load_crypto_strings();
+
+    // 秘密鍵ファイルを読み込み
+    FILE* privateKeyFilePtr = fopen(privateKeyFile, "r");
+    if (!privateKeyFilePtr) {
+        std::cerr << "Error opening private key file." << std::endl;
+        return 1;
+    }
+
+    EC_KEY* eckey = PEM_read_ECPrivateKey(privateKeyFilePtr, NULL, NULL, NULL);
+    fclose(privateKeyFilePtr);
+
+    if (!eckey) {
+        std::cerr << "Error reading private key from file." << std::endl;
+        ERR_print_errors_fp(stderr);
+        return 1;
+    }
+
+    // 秘密鍵データを取得
+    const BIGNUM* privateKey = EC_KEY_get0_private_key(eckey);
+    const EC_GROUP* group = EC_KEY_get0_group(eckey);
+
+    // Microsoft CryptoAPI プロバイダハンドルを取得
+    HCRYPTPROV hProv = NULL;
+    if (!CryptAcquireContext(&hProv, keyContainerName, MS_ENHANCED_PROV, PROV_EC_ECDSA_SIG, CRYPT_MACHINE_KEYSET)) {
+        if (GetLastError() == NTE_BAD_KEYSET) {
+            if (!CryptAcquireContext(&hProv, keyContainerName, MS_ENHANCED_PROV, PROV_EC_ECDSA_SIG | CRYPT_NEWKEYSET, CRYPT_MACHINE_KEYSET)) {
+                std::cerr << "Error creating or opening key container." << std::endl;
+                EC_KEY_free(eckey);
+                ERR_free_strings();
+                EVP_cleanup();
+                return 1;
+            }
+        } else {
+            std::cerr << "Error acquiring CryptoAPI context: " << GetLastError() << std::endl;
+            EC_KEY_free(eckey);
+            ERR_free_strings();
+            EVP_cleanup();
+            return 1;
+        }
+    }
+
+    // 秘密鍵をインポート
+    HCRYPTKEY hKey = NULL;
+    if (!CryptImportECPrivateKey(hProv, eckey, 0, 0)) {
+        std::cerr << "Error importing private key into CryptoAPI: " << GetLastError() << std::endl;
+        CryptReleaseContext(hProv, 0);
+        EC_KEY_free(eckey);
+        ERR_free_strings();
+        EVP_cleanup();
+        return 1;
+    }
+
+    // 秘密鍵ハンドルを解放
+    CryptDestroyKey(hKey);
+
+    // プロバイダハンドルを解放
+    CryptReleaseContext(hProv, 0);
+
+    // OpenSSL 終了
+    EC_KEY_free(eckey);
+    ERR_free_strings();
+    EVP_cleanup();
+
+    return 0;
+}
+```
+
+この修正により、ECDSAプロバイダが使用され、ECDSA鍵がインポートされるはずです。必要に応じてキーコンテナ名を変更してください。また、エラーハンドリングやセキュリティ対策を適切に行うことをお勧めします。秘密鍵の取り扱いには注意が必要です。
