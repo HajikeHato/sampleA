@@ -1,0 +1,86 @@
+ECDSA鍵を名前を指定してインポートし、それをエクスポートするサンプルコードを示します。以下のコードでは、鍵の名前 "ECDSAKey" を指定してECDSA鍵をインポートし、後で同じ名前でエクスポートします。
+
+```cpp
+#include <iostream>
+#include <windows.h>
+#include <ncrypt.h>
+#include <wincrypt.h>
+
+#pragma comment(lib, "ncrypt.lib")
+
+int main() {
+    NCRYPT_PROV_HANDLE hProv = NULL;
+    NCRYPT_KEY_HANDLE hKey = NULL;
+    SECURITY_STATUS status;
+
+    // プロバイダを開く
+    status = NCryptOpenStorageProvider(&hProv, MS_KEY_STORAGE_PROVIDER, 0);
+    if (status != ERROR_SUCCESS) {
+        std::cerr << "NCryptOpenStorageProvider failed: " << status << std::endl;
+        return 1;
+    }
+
+    // PEMファイルからECDSA鍵を名前 "ECDSAKey" でインポートする
+    const wchar_t* pemFilePath = L"path_to_your_key.pem";
+    status = NCryptImportKey(hProv, NULL, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, NULL, &hKey, L"ECDSAKey", pemFilePath, wcslen(pemFilePath), 0);
+    if (status != ERROR_SUCCESS) {
+        std::cerr << "NCryptImportKey failed: " << status << std::endl;
+        NCryptFreeObject(hProv);
+        return 1;
+    }
+
+    // 鍵をPEM形式でエクスポートする
+    const wchar_t* exportFilePath = L"exported_key.pem";
+    status = NCryptExportKey(hKey, NULL, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, NULL, NULL, 0, NULL, 0, NULL);
+    if (status != ERROR_SUCCESS) {
+        std::cerr << "NCryptExportKey failed: " << status << std::endl;
+        NCryptFreeObject(hKey);
+        NCryptFreeObject(hProv);
+        return 1;
+    }
+
+    // エクスポートした鍵データをファイルに保存
+    BYTE* keyData = nullptr;
+    DWORD keyDataSize = 0;
+    status = NCryptExportKey(hKey, NULL, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, NULL, NULL, 0, &keyDataSize, 0, NULL);
+    if (status != ERROR_SUCCESS) {
+        std::cerr << "NCryptExportKey failed (getting key size): " << status << std::endl;
+        NCryptFreeObject(hKey);
+        NCryptFreeObject(hProv);
+        return 1;
+    }
+
+    keyData = new BYTE[keyDataSize];
+    status = NCryptExportKey(hKey, NULL, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, NULL, keyData, keyDataSize, &keyDataSize, 0, NULL);
+    if (status != ERROR_SUCCESS) {
+        std::cerr << "NCryptExportKey failed (exporting key): " << status << std::endl;
+        delete[] keyData;
+        NCryptFreeObject(hKey);
+        NCryptFreeObject(hProv);
+        return 1;
+    }
+
+    // ファイルに書き込む
+    FILE* pemFile = _wfopen(exportFilePath, L"wb");
+    if (pemFile == nullptr) {
+        std::cerr << "Failed to open PEM file for writing." << std::endl;
+        delete[] keyData;
+        NCryptFreeObject(hKey);
+        NCryptFreeObject(hProv);
+        return 1;
+    }
+    fwrite(keyData, 1, keyDataSize, pemFile);
+    fclose(pemFile);
+
+    // リソースを解放
+    delete[] keyData;
+    NCryptFreeObject(hKey);
+    NCryptFreeObject(hProv);
+
+    std::cout << "ECDSA key successfully imported and exported with name 'ECDSAKey'." << std::endl;
+
+    return 0;
+}
+```
+
+このコードは、ECDSA鍵を名前 "ECDSAKey" でインポートし、それを名前を指定してエクスポートする例です。インポートとエクスポートの両方の操作が成功すると、メッセージが表示されます。名前を指定することで、後で同じ名前の鍵を再度取得できます。
