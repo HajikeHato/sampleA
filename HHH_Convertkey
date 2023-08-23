@@ -1,0 +1,140 @@
+OpenSSLのEVP_PKEY構造体にNCRYPT_KEY_HANDLE（CNGキー）を変換するためのサンプルコードを提供します。これにより、CNGキーをOpenSSLのサーバーキーとして設定できます。
+
+```cpp
+#include <windows.h>
+#include <bcrypt.h>
+#include <ncrypt.h>
+#include <openssl/evp.h>
+
+// エラーチェック用マクロ
+#define CHECK_STATUS(status, message) \
+    if (status != ERROR_SUCCESS) { \
+        std::cerr << message << " (Error code: " << status << ")" << std::endl; \
+        return nullptr; \
+    }
+
+// NCRYPT_KEY_HANDLEからEVP_PKEYへの変換関数
+EVP_PKEY* ConvertNcryptKeyToEvpPkey(NCRYPT_KEY_HANDLE hNcryptKey) {
+    DWORD keySize;
+    DWORD keySizeSize = sizeof(DWORD);
+
+    // キーのサイズを取得
+    SECURITY_STATUS status = NCryptGetProperty(hNcryptKey, NCRYPT_KEY_SIZE, (PBYTE)&keySize, &keySizeSize, 0);
+    CHECK_STATUS(status, "Failed to get key size");
+
+    // キーのアルゴリズム名を取得
+    NCryptBufferDesc algorithmName;
+    NCryptBuffer algorithmNameBuffer;
+    algorithmNameBuffer.BufferType = NCRYPTBUFFER_PKCS_ALG_OID;
+    algorithmNameBuffer.cbBuffer = 0;
+    algorithmNameBuffer.pvBuffer = nullptr;
+    algorithmName.ulVersion = NCRYPTBUFFER_VERSION;
+    algorithmName.cBuffers = 1;
+    algorithmName.pBuffers = &algorithmNameBuffer;
+
+    status = NCryptGetProperty(hNcryptKey, NCRYPT_ALGORITHM_GROUP_PROPERTY, (PBYTE)&algorithmName, sizeof(NCryptBufferDesc), 0);
+    CHECK_STATUS(status, "Failed to get algorithm name");
+
+    // アルゴリズム名に基づいてEVP_PKEYを作成
+    EVP_PKEY* pkey = EVP_PKEY_new();
+    if (!pkey) {
+        std::cerr << "Failed to create EVP_PKEY." << std::endl;
+        return nullptr;
+    }
+
+    int type;
+    if (wcscmp((const wchar_t*)algorithmNameBuffer.pvBuffer, NCRYPT_ECDSA_P256_ALGORITHM) == 0) {
+        type = EVP_PKEY_EC;
+    } else {
+        // 他のキーのタイプに対する処理を追加することができます
+        std::cerr << "Unsupported key type." << std::endl;
+        EVP_PKEY_free(pkey);
+        return nullptr;
+    }
+
+    EC_KEY* ec_key = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
+    if (!ec_key) {
+        std::cerr << "Failed to create EC_KEY." << std::endl;
+        EVP_PKEY_free(pkey);
+        return nullptr;
+    }
+
+    BIGNUM* priv_key = BN_new();
+    if (!priv_key) {
+        std::cerr << "Failed to create BIGNUM for private key." << std::endl;
+        EC_KEY_free(ec_key);
+        EVP_PKEY_free(pkey);
+        return nullptr;
+    }
+
+    // NCRYPTキーから秘密鍵を取得
+    status = NCryptExportKey(hNcryptKey, 0, BCRYPT_PRIVATE_KEY_BLOB, NULL, NULL, 0, &keySize, 0);
+    CHECK_STATUS(status, "Failed to get private key size");
+
+    std::vector<BYTE> privKeyBlob(keySize);
+    status = NCryptExportKey(hNcryptKey, 0, BCRYPT_PRIVATE_KEY_BLOB, NULL, privKeyBlob.data(), keySize, &keySize, 0);
+    CHECK_STATUS(status, "Failed to export private key");
+
+    // BLOBから秘密鍵を読み取り
+    status = BN_bin2bn(privKeyBlob.data() + sizeof(BCRYPT_ECCKEY_BLOB), privKeyBlob.size() - sizeof(BCRYPT_ECCKEY_BLOB), priv_key);
+    CHECK_STATUS(status, "Failed to read private key");
+
+    // EC_KEYに秘密鍵をセット
+    if (!EC_KEY_set_private_key(ec_key, priv_key)) {
+        std::cerr << "Failed to set private key for EC_KEY." << std::endl;
+        BN_free(priv_key);
+        EC_KEY_free(ec_key);
+        EVP_PKEY_free(pkey);
+        return nullptr;
+    }
+
+    // EVP_PKEYにEC_KEYをセット
+    if (!EVP_PKEY_set1_EC_KEY(pkey, ec_key)) {
+        std::cerr << "Failed to set EC_KEY for EVP_PKEY." << std::endl;
+        BN_free(priv_key);
+        EC_KEY_free(ec_key);
+        EVP_PKEY_free(pkey);
+        return nullptr;
+    }
+
+    // クリーンアップ
+    BN_free(priv_key);
+    EC_KEY_free(ec_key);
+
+    return pkey;
+}
+
+int main() {
+    // NCryptキーを開く（YourKeyを指定）
+    NCRYPT_PROV_HANDLE hProvider;
+    if (NCryptOpenStorageProvider(&hProvider, MS_KEY_STORAGE_PROVIDER, 0) != ERROR_SUCCESS) {
+        std::cerr << "Failed to open storage provider." << std::endl;
+        return 1;
+    }
+
+    NCRYPT_KEY_HANDLE hNcryptKey;
+    if (NCryptOpenKey(hProvider, &hNcryptKey, L"YourKey", 0, 0) != ERROR_SUCCESS) {
+        std::cerr << "Failed to open key." << std::endl;
+        NCryptFreeObject(hProvider);
+        return 1;
+    }
+
+    // NCRYPT_KEY_HANDLEからEVP_PKEYへの変換
+    EVP_PKEY* pkey = ConvertNcryptKeyToEvpPkey(hNcryptKey);
+    if (!pkey) {
+        std::cerr << "Failed to convert NCRYPT_KEY_HANDLE to EVP_PKEY." << std::endl;
+        NCryptFreeObject(hNcryptKey);
+        NCryptFreeObject(hProvider);
+        return 1;
+    }
+
+    // クリーンアップ
+    EVP_PKEY_free(pkey);
+    NCryptFreeObject(hNcryptKey);
+    NCryptFreeObject(hProvider);
+
+    return 0;
+}
+```
+
+このコードは、指定したNCRYPT_KEY_HANDLEからEVP_PKEYへの変換を行います。ECDSA P-256キーに対して動作し、他のキータイプに対するサポートを追加することもできます。
