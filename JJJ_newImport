@@ -1,0 +1,86 @@
+以下は、提供されたC++コードのファイル読み取り部分をOpenSSLのBIOを使用するように変更したコードです。このコードはOpenSSLライブラリに依存します。
+
+```cpp
+#include <windows.h>
+#include <bcrypt.h>
+#include <ncrypt.h>
+#include <iostream>
+#include <vector>
+#include <openssl/bio.h>
+#include <openssl/pem.h>
+
+// ヘルパー関数: PEM形式の秘密鍵を読み取り、バイト配列として返す
+std::vector<BYTE> ReadPEMPrivateKey(const std::string& pemFileName) {
+    std::vector<BYTE> privateKeyData;
+
+    // ファイルを開く
+    BIO* bio = BIO_new_file(pemFileName.c_str(), "rb");
+    if (!bio) {
+        std::cerr << "Failed to open PEM file." << std::endl;
+        return privateKeyData;
+    }
+
+    // PEM形式の秘密鍵を読み取る
+    EVP_PKEY* pkey = PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL);
+    if (!pkey) {
+        std::cerr << "Failed to read private key." << std::endl;
+        BIO_free(bio);
+        return privateKeyData;
+    }
+
+    // EVP_PKEY構造体からバイト配列に変換
+    const unsigned char* keyData = NULL;
+    int keyLength = i2d_PrivateKey(pkey, &keyData);
+    if (keyLength > 0) {
+        privateKeyData.assign(keyData, keyData + keyLength);
+    }
+
+    // メモリを解放
+    BIO_free(bio);
+    EVP_PKEY_free(pkey);
+
+    return privateKeyData;
+}
+
+int main() {
+    // PEM形式の秘密鍵ファイル名
+    std::string pemFileName = "your_private_key.pem";
+
+    // PEM形式の秘密鍵をバイト配列として読み取る
+    std::vector<BYTE> privateKeyData = ReadPEMPrivateKey(pemFileName);
+    if (privateKeyData.empty()) {
+        return 1;
+    }
+
+    // NCryptキーを作成
+    NCRYPT_PROV_HANDLE hProvider;
+    if (NCryptOpenStorageProvider(&hProvider, MS_KEY_STORAGE_PROVIDER, 0) != ERROR_SUCCESS) {
+        std::cerr << "Failed to open storage provider." << std::endl;
+        return 1;
+    }
+
+    NCRYPT_KEY_HANDLE hKey;
+    if (NCryptCreatePersistedKey(hProvider, &hKey, BCRYPT_ECDSA_P256_ALGORITHM, L"YourKey", 0, 0) != ERROR_SUCCESS) {
+        std::cerr << "Failed to create persisted key." << std::endl;
+        NCryptFreeObject(hProvider);
+        return 1;
+    }
+
+    // PEM形式の秘密鍵データをバイト配列からキーにインポート
+    if (NCryptImportKey(hKey, NULL, BCRYPT_PRIVATE_KEY_BLOB, NULL, privateKeyData.data(), static_cast<DWORD>(privateKeyData.size()), 0) != ERROR_SUCCESS) {
+        std::cerr << "Failed to import private key." << std::endl;
+        NCryptFreeObject(hKey);
+        NCryptFreeObject(hProvider);
+        return 1;
+    }
+
+    // クリーンアップ
+    NCryptFreeObject(hKey);
+    NCryptFreeObject(hProvider);
+
+    std::cout << "Private key imported successfully." << std::endl;
+    return 0;
+}
+```
+
+このコードは、指定したPEM形式の秘密鍵ファイルをOpenSSLのBIOを使用して読み取り、その秘密鍵データをバイト配列として取得し、その後の処理に使用します。必要なライブラリやヘッダーファイルを適切にリンクおよびインクルードすることを忘れないでください。
