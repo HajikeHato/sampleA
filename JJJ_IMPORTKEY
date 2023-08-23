@@ -1,0 +1,75 @@
+#include <windows.h>
+#include <bcrypt.h>
+#include <ncrypt.h>
+#include <iostream>
+#include <fstream>
+#include <vector>
+
+// ヘルパー関数: ファイルからPEM形式の秘密鍵を読み取り、バイト配列として返す
+std::vector<BYTE> ReadPEMPrivateKey(const std::string& pemFileName) {
+    std::vector<BYTE> privateKeyData;
+    std::ifstream pemFile(pemFileName, std::ios::binary);
+    if (!pemFile) {
+        std::cerr << "Failed to open PEM file." << std::endl;
+        return privateKeyData;
+    }
+
+    std::string line;
+    bool readingKey = false;
+    while (std::getline(pemFile, line)) {
+        if (line == "-----BEGIN PRIVATE KEY-----") {
+            readingKey = true;
+        } else if (line == "-----END PRIVATE KEY-----") {
+            break;
+        } else if (readingKey) {
+            // Base64デコードしてバイト配列に追加
+            for (char c : line) {
+                if (c != '\n' && c != '\r') {
+                    privateKeyData.push_back(static_cast<BYTE>(c));
+                }
+            }
+        }
+    }
+
+    return privateKeyData;
+}
+
+int main() {
+    // PEM形式の秘密鍵ファイル名
+    std::string pemFileName = "your_private_key.pem";
+
+    // PEM形式の秘密鍵をバイト配列として読み取る
+    std::vector<BYTE> privateKeyData = ReadPEMPrivateKey(pemFileName);
+    if (privateKeyData.empty()) {
+        return 1;
+    }
+
+    // NCryptキーを作成
+    NCRYPT_PROV_HANDLE hProvider;
+    if (NCryptOpenStorageProvider(&hProvider, MS_KEY_STORAGE_PROVIDER, 0) != ERROR_SUCCESS) {
+        std::cerr << "Failed to open storage provider." << std::endl;
+        return 1;
+    }
+
+    NCRYPT_KEY_HANDLE hKey;
+    if (NCryptCreatePersistedKey(hProvider, &hKey, BCRYPT_ECDSA_P256_ALGORITHM, L"YourKey", 0, 0) != ERROR_SUCCESS) {
+        std::cerr << "Failed to create persisted key." << std::endl;
+        NCryptFreeObject(hProvider);
+        return 1;
+    }
+
+    // PEM形式の秘密鍵データをバイト配列からキーにインポート
+    if (NCryptImportKey(hKey, NULL, BCRYPT_PRIVATE_KEY_BLOB, NULL, privateKeyData.data(), static_cast<DWORD>(privateKeyData.size()), 0) != ERROR_SUCCESS) {
+        std::cerr << "Failed to import private key." << std::endl;
+        NCryptFreeObject(hKey);
+        NCryptFreeObject(hProvider);
+        return 1;
+    }
+
+    // クリーンアップ
+    NCryptFreeObject(hKey);
+    NCryptFreeObject(hProvider);
+
+    std::cout << "Private key imported successfully." << std::endl;
+    return 0;
+}
