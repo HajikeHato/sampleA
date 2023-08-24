@@ -1,0 +1,67 @@
+C++を使用してCNG（Cryptography Next Generation）を使い、指定したキーコンテナ名でECDSA鍵を生成し、それをPEM形式でエクスポートするためには、WindowsのAPIを使用する必要があります。以下は、大まかなステップです：
+
+1. CNGプロバイダーを初期化します。
+2. キーペアを生成します。
+3. キーコンテナにキーを格納します。
+4. キーをPEM形式にエクスポートします。
+
+以下は、これらのステップを実行するC++のコードの例です。ただし、実際のアプリケーションにはエラーハンドリングなどの追加のコードが必要かもしれません。
+
+```cpp
+#include <windows.h>
+#include <bcrypt.h>
+#include <iostream>
+#include <fstream>
+#include <vector>
+
+#pragma comment(lib, "bcrypt.lib")
+
+int main() {
+    // ステップ1: CNGプロバイダーを初期化する
+    if (BCryptOpenAlgorithmProvider) {
+        BCRYPT_ALG_HANDLE hAlgorithm = NULL;
+        if (BCryptOpenAlgorithmProvider(&hAlgorithm, BCRYPT_ECDSA_P256_ALGORITHM, NULL, 0) == STATUS_SUCCESS) {
+            
+            // ステップ2: キーペアを生成する
+            BCRYPT_KEY_HANDLE hKey = NULL;
+            if (BCryptGenerateKeyPair(hAlgorithm, &hKey, 256, 0) == STATUS_SUCCESS) {
+                
+                // ステップ3: キーコンテナにキーを格納する
+                if (BCryptFinalizeKeyPair(hKey, 0) == STATUS_SUCCESS) {
+                    
+                    // ステップ4: キーをPEM形式にエクスポートする
+                    std::vector<byte> exportKeyBuffer(2048); // バッファのサイズを適切に調整
+                    DWORD exportKeyLength;
+                    if (BCryptExportKey(hKey, NULL, BCRYPT_PRIVATE_KEY_BLOB, exportKeyBuffer.data(), exportKeyBuffer.size(), &exportKeyLength, 0) == STATUS_SUCCESS) {
+                        
+                        // ファイルにPEM形式のキーを保存する（ここでは例としてファイル名を指定）
+                        std::ofstream pemFile("ecdsa_private_key.pem");
+                        if (pemFile.is_open()) {
+                            pemFile.write(reinterpret_cast<char*>(exportKeyBuffer.data()), exportKeyLength);
+                            pemFile.close();
+                            std::cout << "ECDSA private key exported to ecdsa_private_key.pem" << std::endl;
+                        } else {
+                            std::cerr << "Failed to open PEM file for writing." << std::endl;
+                        }
+                    } else {
+                        std::cerr << "Failed to export ECDSA private key." << std::endl;
+                    }
+                } else {
+                    std::cerr << "Failed to finalize key pair." << std::endl;
+                }
+            } else {
+                std::cerr << "Failed to generate key pair." << std::endl;
+            }
+            BCryptCloseAlgorithmProvider(hAlgorithm, 0);
+        } else {
+            std::cerr << "Failed to open CNG algorithm provider." << std::endl;
+        }
+    } else {
+        std::cerr << "BCryptOpenAlgorithmProvider function not found." << std::endl;
+    }
+    
+    return 0;
+}
+```
+
+このコードは、ECDSA P-256アルゴリズムを使用してキーを生成し、PEM形式でエクスポートします。キーをエクスポートするファイル名は適宜変更してください。また、エラーハンドリングなどのセキュリティ関連の検討事項にも注意してください。
