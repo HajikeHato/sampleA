@@ -1,0 +1,103 @@
+もちろん、C++を使用してCNGを介してECDSAキーを生成し、PEM形式でエクスポートするコードの全文を以下に示します。これにはEC PARAMETERS、EC PRIVATE KEYの両方が含まれます。
+
+```cpp
+#include <windows.h>
+#include <bcrypt.h>
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <openssl/pem.h>
+#include <openssl/evp.h>
+
+#pragma comment(lib, "bcrypt.lib")
+
+int main() {
+    // ステップ1: CNGプロバイダーを初期化する
+    BCRYPT_ALG_HANDLE hAlgorithm = NULL;
+    if (BCryptOpenAlgorithmProvider(&hAlgorithm, BCRYPT_ECDSA_P256_ALGORITHM, NULL, 0) == STATUS_SUCCESS) {
+        
+        // ステップ2: キーペアを生成する
+        BCRYPT_KEY_HANDLE hKey = NULL;
+        if (BCryptGenerateKeyPair(hAlgorithm, &hKey, 256, 0) == STATUS_SUCCESS) {
+            
+            // ステップ3: キーコンテナにキーを格納する
+            if (BCryptFinalizeKeyPair(hKey, 0) == STATUS_SUCCESS) {
+                
+                // ステップ4: EC PARAMETERSの取得
+                std::vector<byte> ecParamsBuffer(2048); // バッファのサイズを適切に調整
+                DWORD ecParamsLength;
+                if (BCryptGetProperty(hKey, BCRYPT_ECC_PARAMETERS, ecParamsBuffer.data(), ecParamsBuffer.size(), &ecParamsLength, 0) == STATUS_SUCCESS) {
+                    // バイナリデータをBase64でエンコード
+                    BIO* memParams = BIO_new(BIO_s_mem());
+                    BIO* b64Params = BIO_new(BIO_f_base64());
+                    memParams = BIO_push(b64Params, memParams);
+                    BIO_write(memParams, ecParamsBuffer.data(), ecParamsLength);
+                    BIO_flush(memParams);
+                    
+                    // EC PARAMETERSのPEM形式ヘッダーとフッターを追加
+                    std::string pemParamsData;
+                    pemParamsData += "-----BEGIN EC PARAMETERS-----\n";
+                    char* encodedParamsData;
+                    long pemParamsDataLength = BIO_get_mem_data(memParams, &encodedParamsData);
+                    pemParamsData += std::string(encodedData, pemParamsDataLength);
+                    pemParamsData += "\n-----END EC PARAMETERS-----\n";
+                    
+                    // ステップ5: EC PRIVATE KEYのバイナリデータを取得
+                    std::vector<byte> exportKeyBuffer(2048); // バッファのサイズを適切に調整
+                    DWORD exportKeyLength;
+                    if (BCryptExportKey(hKey, NULL, BCRYPT_PRIVATE_KEY_BLOB, exportKeyBuffer.data(), exportKeyBuffer.size(), &exportKeyLength, 0) == STATUS_SUCCESS) {
+                        
+                        // バイナリデータをBase64でエンコード
+                        BIO* mem = BIO_new(BIO_s_mem());
+                        BIO* b64 = BIO_new(BIO_f_base64());
+                        mem = BIO_push(b64, mem);
+                        BIO_write(mem, exportKeyBuffer.data(), exportKeyLength);
+                        BIO_flush(mem);
+                        
+                        // ステップ6: EC PRIVATE KEYのPEM形式ヘッダーとフッターを追加
+                        std::string pemData;
+                        pemData += "-----BEGIN EC PRIVATE KEY-----\n";
+                        char* encodedData;
+                        long pemDataLength = BIO_get_mem_data(mem, &encodedData);
+                        pemData += std::string(encodedData, pemDataLength);
+                        pemData += "\n-----END EC PRIVATE KEY-----\n";
+                        
+                        // ステップ7: PEMデータをファイルに保存
+                        std::ofstream pemFile("ecdsa_private_key.pem");
+                        if (pemFile.is_open()) {
+                            // EC PARAMETERSデータを書き込み
+                            pemFile << pemParamsData;
+                            // 改行
+                            pemFile << "\n";
+                            // EC PRIVATE KEYデータを書き込み
+                            pemFile << pemData;
+                            pemFile.close();
+                            std::cout << "ECDSA private key exported to ecdsa_private_key.pem" << std::endl;
+                        } else {
+                            std::cerr << "Failed to open PEM file for writing." << std::endl;
+                        }
+                        
+                        // メモリリソースの解放
+                        BIO_free_all(mem);
+                    } else {
+                        std::cerr << "Failed to export ECDSA private key." << std::endl;
+                    }
+                } else {
+                    std::cerr << "Failed to get EC PARAMETERS." << std::endl;
+                }
+            } else {
+                std::cerr << "Failed to finalize key pair." << std::endl;
+            }
+        } else {
+            std::cerr << "Failed to generate key pair." << std::endl;
+        }
+        BCryptCloseAlgorithmProvider(hAlgorithm, 0);
+    } else {
+        std::cerr << "Failed to open CNG algorithm provider." << std::endl;
+    }
+    
+    return 0;
+}
+```
+
+このコードはEC PARAMETERSとEC PRIVATE KEYの両方を含むPEM形式のキーを生成し、ファイルに保存します。必要に応じてエラーハンドリングを強化し、リソースの解放を確実に行ってください。
