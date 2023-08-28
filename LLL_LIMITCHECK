@@ -1,0 +1,63 @@
+以下は、C++でOpenSSLを使用してクライアントがサーバー証明書の有効期限を確認するためのサンプルコードです。このコードは、OpenSSLライブラリをリンクし、SSL接続を確立し、サーバー証明書の有効期限を確認するための基本的な手順を示しています。
+
+```cpp
+#include <iostream>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
+int main() {
+    // 初期化
+    SSL_library_init();
+    SSL_load_error_strings();
+    ERR_load_BIO_strings();
+    OpenSSL_add_all_algorithms();
+
+    // SSLコンテキストを作成
+    SSL_CTX *ctx = SSL_CTX_new(SSLv23_client_method());
+    if (!ctx) {
+        std::cerr << "SSL_CTX_new() 失敗" << std::endl;
+        return 1;
+    }
+
+    // サーバーに接続
+    const char *server_ip = "サーバーのIPアドレス";
+    const int server_port = 443; // HTTPSポート
+    BIO *bio = BIO_new_ssl_connect(ctx);
+    BIO_set_conn_hostname(bio, (server_ip + ":" + std::to_string(server_port)).c_str());
+    if (BIO_do_connect(bio) <= 0) {
+        std::cerr << "サーバーに接続できませんでした" << std::endl;
+        return 1;
+    }
+
+    // SSLセッションを作成
+    SSL *ssl;
+    BIO_get_ssl(bio, &ssl);
+    if (!ssl) {
+        std::cerr << "SSLセッションの作成に失敗" << std::endl;
+        return 1;
+    }
+
+    // サーバー証明書の有効期限を確認
+    X509 *server_cert = SSL_get_peer_certificate(ssl);
+    if (server_cert) {
+        std::cout << "サーバー証明書の有効期限を確認中..." << std::endl;
+        time_t now = time(nullptr);
+        if (X509_cmp_time(X509_get_notAfter(server_cert), &now) < 0) {
+            std::cout << "サーバー証明書は有効期限切れです" << std::endl;
+        } else {
+            std::cout << "サーバー証明書は有効です" << std::endl;
+        }
+        X509_free(server_cert);
+    } else {
+        std::cerr << "サーバー証明書が取得できませんでした" << std::endl;
+    }
+
+    // 接続をクローズ
+    BIO_free_all(bio);
+    SSL_CTX_free(ctx);
+
+    return 0;
+}
+```
+
+このコードでは、OpenSSLを使用してサーバーに接続し、サーバー証明書の有効期限を確認しています。サーバーのIPアドレスとポート番号を設定して、必要に応じてエラーハンドリングを追加してください。また、ライブラリのパスやインクルードパスなど、ビルド設定に注意してください。
