@@ -1,0 +1,91 @@
+#include <windows.h>
+#include <wincrypt.h>
+#include <iostream>
+#include <fstream>
+
+#pragma comment(lib, "crypt32.lib")
+
+int main() {
+    HCERTSTORE hCertStore = NULL;
+    PCCERT_CONTEXT pCertContext = NULL;
+    HCERTSTORE hMemoryStore = NULL;
+    CRYPT_SIGN_MESSAGE_PARA SignPara;
+    BYTE* pbSignedMessage = NULL;
+    DWORD cbSignedMessage = 0;
+
+    // CSRファイルのパス
+    const wchar_t* csrFilePath = L"C:\\Path\\To\\YourCSR.csr";
+    // CRTファイルのパス
+    const wchar_t* crtFilePath = L"C:\\Path\\To\\YourCertificate.crt";
+
+    // CSRファイルを読み込む
+    std::ifstream csrFile(csrFilePath, std::ios::binary | std::ios::in);
+    if (!csrFile) {
+        std::cerr << "Failed to open CSR file" << std::endl;
+        return 1;
+    }
+
+    csrFile.seekg(0, std::ios::end);
+    std::streamsize csrSize = csrFile.tellg();
+    csrFile.seekg(0, std::ios::beg);
+
+    BYTE* pbCSR = new BYTE[static_cast<size_t>(csrSize)];
+    csrFile.read(reinterpret_cast<char*>(pbCSR), csrSize);
+    csrFile.close();
+
+    // 署名パラメータを設定
+    memset(&SignPara, 0, sizeof(SignPara));
+    SignPara.cbSize = sizeof(SignPara);
+    SignPara.dwMsgEncodingType = X509_ASN_ENCODING | PKCS_7_ASN_ENCODING;
+    
+    // メッセージを署名
+    if (!CryptSignMessage(&SignPara, FALSE, 1, &pbCSR, &csrSize, NULL, &cbSignedMessage)) {
+        std::cerr << "CryptSignMessage failed" << std::endl;
+        delete[] pbCSR;
+        return 1;
+    }
+
+    // CRTファイルに証明書をエクスポート
+    hMemoryStore = CertOpenStore(CERT_STORE_PROV_MEMORY, 0, NULL, 0, NULL);
+    if (!hMemoryStore) {
+        std::cerr << "CertOpenStore failed" << std::endl;
+        delete[] pbCSR;
+        return 1;
+    }
+
+    pCertContext = CertCreateCertificateContext(X509_ASN_ENCODING, pbSignedMessage, cbSignedMessage);
+    if (!pCertContext) {
+        std::cerr << "CertCreateCertificateContext failed" << std::endl;
+        delete[] pbCSR;
+        return 1;
+    }
+
+    if (!CertAddCertificateContextToStore(hMemoryStore, pCertContext, CERT_STORE_ADD_NEW, NULL)) {
+        std::cerr << "CertAddCertificateContextToStore failed" << std::endl;
+        delete[] pbCSR;
+        return 1;
+    }
+
+    if (!CertSaveStore(hMemoryStore, X509_ASN_ENCODING, CERT_STORE_SAVE_AS_PKCS7, CERT_STORE_SAVE_TO_FILENAME, crtFilePath, pCertContext, 0)) {
+        std::cerr << "CertSaveStore failed" << std::endl;
+        delete[] pbCSR;
+        return 1;
+    }
+
+    // メモリを解放
+    if (pbSignedMessage != NULL) {
+        LocalFree(pbSignedMessage);
+    }
+
+    if (pCertContext) {
+        CertFreeCertificateContext(pCertContext);
+    }
+
+    if (hMemoryStore) {
+        CertCloseStore(hMemoryStore, 0);
+    }
+
+    delete[] pbCSR;
+
+    return 0;
+}
